@@ -75,23 +75,23 @@ export type Database = {
         Row: {
           action_keys: string[]; approved_at: string | null; approved_by: string | null;
           city_codes: string[]; country: string; created_at: string; creator_id: string;
-          csv_file_name: string | null; end_date: string; id: string; name: string;
-          start_date: string; status: string; sub_team: string | null; team: string;
-          types: string[]; updated_at: string;
+          csv_file_name: string | null; deleted_at: string | null; deleted_by: string | null;
+          end_date: string; id: string; name: string; start_date: string; status: string;
+          sub_team: string | null; team: string; types: string[]; updated_at: string;
         };
         Insert: {
           action_keys?: string[]; approved_at?: string | null; approved_by?: string | null;
           city_codes?: string[]; country?: string; created_at?: string; creator_id: string;
-          csv_file_name?: string | null; end_date: string; id?: string; name: string;
-          start_date: string; status?: string; sub_team?: string | null; team?: string;
-          types?: string[]; updated_at?: string;
+          csv_file_name?: string | null; deleted_at?: string | null; deleted_by?: string | null;
+          end_date: string; id?: string; name: string; start_date: string; status?: string;
+          sub_team?: string | null; team?: string; types?: string[]; updated_at?: string;
         };
         Update: {
           action_keys?: string[]; approved_at?: string | null; approved_by?: string | null;
           city_codes?: string[]; country?: string; created_at?: string; creator_id?: string;
-          csv_file_name?: string | null; end_date?: string; id?: string; name?: string;
-          start_date?: string; status?: string; sub_team?: string | null; team?: string;
-          types?: string[]; updated_at?: string;
+          csv_file_name?: string | null; deleted_at?: string | null; deleted_by?: string | null;
+          end_date?: string; id?: string; name?: string; start_date?: string; status?: string;
+          sub_team?: string | null; team?: string; types?: string[]; updated_at?: string;
         };
         Relationships: [];
       };
@@ -142,6 +142,10 @@ export type Database = {
         }[];
       };
       has_role: { Args: { _role: Database["public"]["Enums"]["app_role"]; _user_id: string }; Returns: boolean };
+      cancel_campaign: { Args: { p_campaign_id: string }; Returns: boolean };
+      approve_campaign: { Args: { p_campaign_id: string }; Returns: boolean };
+      reject_campaign: { Args: { p_campaign_id: string }; Returns: boolean };
+      delete_campaign_hard: { Args: { p_campaign_id: string }; Returns: boolean };
       save_campaign_v2: {
         Args: {
           p_action_keys: string[]; p_audience: Json; p_city_codes: string[];

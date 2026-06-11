@@ -109,6 +109,7 @@ export default function DashboardView() {
     if (!rawCampaigns || !rawSchedules) return [];
     const items: ScheduleItem[] = [];
     for (const camp of rawCampaigns) {
+      if (camp.status === "rejected" || camp.status === "cancelled") continue;
       const campSchedules = rawSchedules.filter(s => s.campaign_id === camp.id);
       for (const sched of campSchedules) {
         items.push({
@@ -625,7 +626,7 @@ export default function DashboardView() {
                   </tr>
                 </thead>
                 <tbody>
-                  {(rawCampaigns ?? []).slice(0, 20).map(camp => {
+                  {(rawCampaigns ?? []).filter(c => c.status !== "rejected" && c.status !== "cancelled").slice(0, 20).map(camp => {
                     const campItems = scheduleItems.filter(s => s.name === camp.name);
                     const channels = [...new Set(campItems.map(c => c.actionKey))];
                     return (
