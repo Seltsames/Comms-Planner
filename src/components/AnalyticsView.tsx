@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import type { CampaignRow, CampaignScheduleRow } from "@/lib/queries";
+import type { CampaignRow, CampaignScheduleRow, AnalyticsAggregates } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
   Users, Calendar, Megaphone, BarChart3, MapPin,
@@ -33,6 +33,7 @@ function shortName(fullName: string) {
 }
 
 function cityName(code: string): string {
+  if (!code || code === "N/A") return code;
   const found = CITIES_DATA.find(c => c.id === code);
   return found ? found.name : code;
 }
@@ -64,7 +65,6 @@ interface ScheduleItem {
   cityCodes: string[];
   creatorId: string;
   status: string;
-  drvIds: string[];
 }
 
 function parseTimeMinutes(slot: string): number | null {
@@ -79,6 +79,16 @@ function parseTimeMinutes(slot: string): number | null {
   return h * 60 + m;
 }
 
+const EMPTY_AGGREGATES: AnalyticsAggregates = {
+  kpis: { total_comms: 0, total_drivers: 0, total_campaigns: 0, total_countries: 0, total_cities: 0, total_days: 0 },
+  top_drivers: [],
+  drivers_by_country: [],
+  drivers_by_city: [],
+  campaigns_by_country: [],
+  campaigns_by_city: [],
+  per_campaign_drivers: [],
+};
+
 export default function AnalyticsView() {
   const { role } = useAuth();
   const isAdmin = role === "admin";
@@ -88,6 +98,26 @@ export default function AnalyticsView() {
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
 
+  // ===== Server-side aggregates (admin only) =====
+  const { data: aggregates, loading: aggregatesLoading, error: aggregatesError } = useAutoRefresh(
+    async () => {
+      try {
+        const { data, error } = await supabase.rpc("get_analytics_aggregates", {
+          p_country: countryFilter,
+          p_channel: channelFilter,
+        });
+        if (error) throw error;
+        return (data as AnalyticsAggregates) ?? null;
+      } catch (err) {
+        console.error("get_analytics_aggregates error", err);
+        throw err;
+      }
+    },
+    60_000,
+    [countryFilter, channelFilter],
+  );
+
+  // ===== Lightweight client-side data (small tables, no audience) =====
   const { data: rawCampaigns } = useAutoRefresh(
     async () => {
       const { data } = await supabase
@@ -109,32 +139,26 @@ export default function AnalyticsView() {
     [],
   );
 
-  const { data: rawAudience } = useAutoRefresh(
-    async () => {
-      const { data } = await supabase.from("campaign_audience").select("campaign_id, drv_id, city_code");
-      return data ?? null;
-    },
-    60_000,
-    [],
-  );
-
-  const audienceByCampaign = useMemo(() => {
-    const map: Record<string, Array<{ drv_id: string; city_code: string | null }>> = {};
-    (rawAudience ?? []).forEach(a => {
-      if (!map[a.campaign_id]) map[a.campaign_id] = [];
-      map[a.campaign_id].push({ drv_id: a.drv_id, city_code: a.city_code });
+  // Build per-campaign driver count lookup from RPC
+  const driversByCampaign = useMemo(() => {
+    const map: Record<string, number> = {};
+    (aggregates?.per_campaign_drivers ?? []).forEach(p => {
+      map[p.campaign_id] = p.drivers;
     });
     return map;
-  }, [rawAudience]);
+  }, [aggregates]);
 
   const scheduleItems = useMemo((): ScheduleItem[] => {
     if (!rawCampaigns || !rawSchedules) return [];
+    const campMap: Record<string, CampaignRow> = {};
+    rawCampaigns.forEach(c => { campMap[c.id] = c; });
     const items: ScheduleItem[] = [];
     for (const camp of rawCampaigns) {
       if (camp.status === "rejected" || camp.status === "cancelled") continue;
+      if (countryFilter !== "all" && camp.country !== countryFilter) continue;
       const campSchedules = rawSchedules.filter(s => s.campaign_id === camp.id);
-      const aud = audienceByCampaign[camp.id] ?? [];
       for (const sched of campSchedules) {
+        if (channelFilter !== "all" && sched.action_key !== channelFilter) continue;
         items.push({
           id: sched.id,
           name: camp.name,
@@ -147,56 +171,18 @@ export default function AnalyticsView() {
           cityCodes: camp.city_codes,
           creatorId: camp.creator_id,
           status: camp.status,
-          drvIds: aud.map(a => a.drv_id),
         });
       }
     }
     return items;
-  }, [rawCampaigns, rawSchedules, audienceByCampaign]);
+  }, [rawCampaigns, rawSchedules, countryFilter, channelFilter]);
 
-  const filteredItems = useMemo(() => {
-    return scheduleItems.filter(c =>
-      (countryFilter === "all" || c.country === countryFilter) &&
-      (channelFilter === "all" || c.actionKey === channelFilter),
-    );
-  }, [scheduleItems, countryFilter, channelFilter]);
+  // ===== CLIENT-SIDE METRICS (small data, fast) =====
 
-  const filterOptions = useMemo(() => {
-    const channels = new Set<string>();
-    const countries = new Set<string>();
-    scheduleItems.forEach(c => {
-      channels.add(c.actionKey);
-      if (c.country) countries.add(c.country);
-    });
-    return {
-      channels: Array.from(channels).sort(),
-      countries: Array.from(countries).sort(),
-    };
-  }, [scheduleItems]);
-
-  // ============ TOP DRIVER WITH MOST NOTIFICATIONS ============
-  const topDrivers = useMemo(() => {
-    const driverMap: Record<string, { count: number; channels: Set<string>; campaigns: Set<string>; countries: Set<string>; dates: Set<string> }> = {};
-    filteredItems.forEach(item => {
-      item.drvIds.forEach(drv => {
-        if (!driverMap[drv]) driverMap[drv] = { count: 0, channels: new Set(), campaigns: new Set(), countries: new Set(), dates: new Set() };
-        driverMap[drv].count++;
-        driverMap[drv].channels.add(item.actionKey);
-        driverMap[drv].campaigns.add(item.name);
-        driverMap[drv].countries.add(item.country);
-        driverMap[drv].dates.add(item.scheduleDate);
-      });
-    });
-    return Object.entries(driverMap)
-      .map(([id, data]) => ({ id, ...data, channels: Array.from(data.channels), campaigns: Array.from(data.campaigns), countries: Array.from(data.countries) }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-  }, [filteredItems]);
-
-  // ============ COMMS BY COUNTRY / CITY ============
+  // Comms by country + city (from schedules only, no audience)
   const commsByCountry = useMemo(() => {
     const map: Record<string, { total: number; channels: Record<string, number>; campaigns: Set<string>; cities: Set<string> }> = {};
-    filteredItems.forEach(c => {
+    scheduleItems.forEach(c => {
       const country = c.country || "N/A";
       if (!map[country]) map[country] = { total: 0, channels: {}, campaigns: new Set(), cities: new Set() };
       map[country].total++;
@@ -207,11 +193,11 @@ export default function AnalyticsView() {
     return Object.entries(map)
       .map(([country, data]) => ({ country, ...data, campaigns: data.campaigns.size }))
       .sort((a, b) => b.total - a.total);
-  }, [filteredItems]);
+  }, [scheduleItems]);
 
   const commsByCity = useMemo(() => {
     const map: Record<string, { total: number; channels: Record<string, number>; country: string; campaigns: Set<string> }> = {};
-    filteredItems.forEach(c => {
+    scheduleItems.forEach(c => {
       c.cityCodes.forEach(city => {
         if (!map[city]) map[city] = { total: 0, channels: {}, country: c.country, campaigns: new Set() };
         map[city].total++;
@@ -223,83 +209,34 @@ export default function AnalyticsView() {
       .map(([city, data]) => ({ city, ...data, campaigns: data.campaigns.size }))
       .sort((a, b) => b.total - a.total)
       .slice(0, 15);
-  }, [filteredItems]);
+  }, [scheduleItems]);
 
-  // ============ DRIVERS BY COUNTRY / CITY ============
-  const driversByCountry = useMemo(() => {
-    const map: Record<string, Set<string>> = {};
-    filteredItems.forEach(c => {
-      const country = c.country || "N/A";
-      if (!map[country]) map[country] = new Set();
-      c.drvIds.forEach(d => map[country].add(d));
+  // Channel usage (from schedules)
+  const channelUsage = useMemo(() => {
+    const map: Record<string, { comms: number; campaigns: Set<string>; countries: Set<string> }> = {};
+    scheduleItems.forEach(c => {
+      if (!map[c.actionKey]) map[c.actionKey] = { comms: 0, campaigns: new Set(), countries: new Set() };
+      map[c.actionKey].comms++;
+      map[c.actionKey].campaigns.add(c.name);
+      map[c.actionKey].countries.add(c.country);
     });
     return Object.entries(map)
-      .map(([country, set]) => ({ country, count: set.size }))
-      .sort((a, b) => b.count - a.count);
-  }, [filteredItems]);
+      .map(([channel, data]) => ({
+        channel,
+        comms: data.comms,
+        campaigns: data.campaigns.size,
+        countries: data.countries.size,
+      }))
+      .sort((a, b) => b.comms - a.comms);
+  }, [scheduleItems]);
 
-  const driversByCity = useMemo(() => {
-    const map: Record<string, { country: string; drivers: Set<string> }> = {};
-    (rawAudience ?? []).forEach(a => {
-      const city = a.city_code || "N/A";
-      if (!map[city]) {
-        const camp = (rawCampaigns ?? []).find(c => c.id === a.campaign_id);
-        map[city] = { country: camp?.country ?? "N/A", drivers: new Set() };
-      }
-      map[city].drivers.add(a.drv_id);
-    });
-    return Object.entries(map)
-      .map(([city, data]) => ({ city, country: data.country, count: data.drivers.size }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 15);
-  }, [rawAudience, rawCampaigns]);
+  const maxChannelComms = Math.max(1, ...channelUsage.map(c => c.comms));
 
-  // ============ CAMPAIGNS BY COUNTRY / CITY ============
-  const campaignsByCountry = useMemo(() => {
-    const map: Record<string, { campaigns: Set<string>; comms: number; drivers: Set<string> }> = {};
-    (rawCampaigns ?? []).forEach(c => {
-      if (c.status === "rejected" || c.status === "cancelled") return;
-      if (countryFilter !== "all" && c.country !== countryFilter) return;
-      const country = c.country || "N/A";
-      if (!map[country]) map[country] = { campaigns: new Set(), comms: 0, drivers: new Set() };
-      map[country].campaigns.add(c.id);
-      const aud = audienceByCampaign[c.id] ?? [];
-      aud.forEach(a => map[country].drivers.add(a.drv_id));
-    });
-    (rawSchedules ?? []).forEach(s => {
-      const camp = (rawCampaigns ?? []).find(c => c.id === s.campaign_id);
-      if (!camp) return;
-      if (camp.status === "rejected" || camp.status === "cancelled") return;
-      if (countryFilter !== "all" && camp.country !== countryFilter) return;
-      if (map[camp.country]) map[camp.country].comms++;
-    });
-    return Object.entries(map)
-      .map(([country, data]) => ({ country, campaigns: data.campaigns.size, comms: data.comms, drivers: data.drivers.size }))
-      .sort((a, b) => b.campaigns - a.campaigns);
-  }, [rawCampaigns, rawSchedules, rawAudience, audienceByCampaign, countryFilter]);
-
-  const campaignsByCity = useMemo(() => {
-    const map: Record<string, { country: string; campaigns: Set<string>; drivers: Set<string> }> = {};
-    (rawCampaigns ?? []).forEach(c => {
-      if (c.status === "rejected" || c.status === "cancelled") return;
-      c.city_codes.forEach(city => {
-        if (!map[city]) map[city] = { country: c.country, campaigns: new Set(), drivers: new Set() };
-        map[city].campaigns.add(c.id);
-        const aud = audienceByCampaign[c.id] ?? [];
-        aud.forEach(a => map[city].drivers.add(a.drv_id));
-      });
-    });
-    return Object.entries(map)
-      .map(([city, data]) => ({ city, country: data.country, campaigns: data.campaigns.size, drivers: data.drivers.size }))
-      .sort((a, b) => b.campaigns - a.campaigns)
-      .slice(0, 15);
-  }, [rawCampaigns, audienceByCampaign]);
-
-  // ============ HOURLY HEAT MAP ============
+  // Hourly heat map
   const hourlyData = useMemo(() => {
     const hourCounts: Record<number, { total: number; channels: Record<string, number> }> = {};
     HOURS.forEach(h => { hourCounts[h] = { total: 0, channels: {} }; });
-    filteredItems.forEach(c => {
+    scheduleItems.forEach(c => {
       const minutes = parseTimeMinutes(c.timeSlot);
       if (minutes === null) return;
       const h = Math.floor(minutes / 60);
@@ -309,58 +246,61 @@ export default function AnalyticsView() {
     });
     const maxCount = Math.max(1, ...Object.values(hourCounts).map(d => d.total));
     return { hourCounts, maxCount };
-  }, [filteredItems]);
+  }, [scheduleItems]);
 
-  // ============ WEEKLY VOLUME ============
+  // Weekly volume
   const weeklyData = useMemo(() => {
-    const weekMap: Record<string, { comms: number; drivers: Set<string>; channels: Record<string, number>; dates: Set<string> }> = {};
-    filteredItems.forEach(c => {
+    const weekMap: Record<string, { comms: number; channels: Record<string, number>; dates: Set<string> }> = {};
+    scheduleItems.forEach(c => {
       const { week } = getIsoWeek(c.scheduleDate);
-      if (!weekMap[week]) weekMap[week] = { comms: 0, drivers: new Set(), channels: {}, dates: new Set() };
+      if (!weekMap[week]) weekMap[week] = { comms: 0, channels: {}, dates: new Set() };
       weekMap[week].comms++;
       weekMap[week].channels[c.actionKey] = (weekMap[week].channels[c.actionKey] || 0) + 1;
       weekMap[week].dates.add(c.scheduleDate);
-      c.drvIds.forEach(d => weekMap[week].drivers.add(d));
     });
     return Object.entries(weekMap)
-      .map(([week, data]) => ({ week, comms: data.comms, drivers: data.drivers.size, channels: data.channels, days: data.dates.size }))
+      .map(([week, data]) => ({ week, comms: data.comms, channels: data.channels, days: data.dates.size }))
       .sort((a, b) => a.week.localeCompare(b.week));
-  }, [filteredItems]);
+  }, [scheduleItems]);
 
   const maxWeeklyComms = Math.max(1, ...weeklyData.map(w => w.comms));
 
-  // ============ CHANNEL USAGE ============
-  const channelUsage = useMemo(() => {
-    const map: Record<string, { comms: number; drivers: Set<string>; campaigns: Set<string>; countries: Set<string> }> = {};
-    filteredItems.forEach(c => {
-      if (!map[c.actionKey]) map[c.actionKey] = { comms: 0, drivers: new Set(), campaigns: new Set(), countries: new Set() };
-      map[c.actionKey].comms++;
-      map[c.actionKey].campaigns.add(c.name);
-      map[c.actionKey].countries.add(c.country);
-      c.drvIds.forEach(d => map[c.actionKey].drivers.add(d));
-    });
-    return Object.entries(map)
-      .map(([channel, data]) => ({ channel, comms: data.comms, drivers: data.drivers.size, campaigns: data.campaigns.size, countries: data.countries.size }))
-      .sort((a, b) => b.comms - a.comms);
-  }, [filteredItems]);
-
-  const maxChannelComms = Math.max(1, ...channelUsage.map(c => c.comms));
-
-  // ============ PER-CAMPAIGN TABLE ============
+  // Per-campaign table (uses RPC for driver counts)
   const campaignRows = useMemo(() => {
-    const map: Record<string, { name: string; comms: number; drivers: Set<string>; channels: Set<string>; countries: Set<string>; dates: Set<string>; team: string }> = {};
-    filteredItems.forEach(c => {
-      if (!map[c.name]) map[c.name] = { name: c.name, comms: 0, drivers: new Set(), channels: new Set(), countries: new Set(), dates: new Set(), team: c.team };
+    const map: Record<string, {
+      name: string;
+      campaignId: string;
+      comms: number;
+      drivers: number;
+      channels: Set<string>;
+      countries: Set<string>;
+      dates: Set<string>;
+      team: string;
+    }> = {};
+    scheduleItems.forEach(c => {
+      if (!map[c.name]) {
+        // Find the campaign ID for driver count lookup
+        const matchingCamp = (rawCampaigns ?? []).find(rc => rc.name === c.name);
+        map[c.name] = {
+          name: c.name,
+          campaignId: matchingCamp?.id ?? "",
+          comms: 0,
+          drivers: matchingCamp ? (driversByCampaign[matchingCamp.id] ?? 0) : 0,
+          channels: new Set(),
+          countries: new Set(),
+          dates: new Set(),
+          team: c.team,
+        };
+      }
       map[c.name].comms++;
       map[c.name].channels.add(c.actionKey);
       map[c.name].countries.add(c.country);
       map[c.name].dates.add(c.scheduleDate);
-      c.drvIds.forEach(d => map[c.name].drivers.add(d));
     });
     return Object.values(map)
-      .map(c => ({ ...c, drivers: c.drivers.size, channels: Array.from(c.channels), countries: Array.from(c.countries), dates: c.dates.size }))
+      .map(c => ({ ...c, channels: Array.from(c.channels), countries: Array.from(c.countries), dates: c.dates.size }))
       .sort((a, b) => b.drivers - a.drivers);
-  }, [filteredItems]);
+  }, [scheduleItems, rawCampaigns, driversByCampaign]);
 
   const filteredCampaignRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -370,29 +310,25 @@ export default function AnalyticsView() {
 
   const visibleCampaigns = showAllCampaigns ? filteredCampaignRows : filteredCampaignRows.slice(0, 5);
 
-  // ============ TOP-LEVEL KPIS ============
-  const totalComms = filteredItems.length;
-  const totalDrivers = useMemo(() => {
-    const set = new Set<string>();
-    filteredItems.forEach(c => c.drvIds.forEach(d => set.add(d)));
-    return set.size;
-  }, [filteredItems]);
-  const totalCampaigns = useMemo(() => {
-    return new Set(filteredItems.map(c => c.name)).size;
-  }, [filteredItems]);
-  const totalCountries = useMemo(() => {
-    return new Set(filteredItems.map(c => c.country)).size;
-  }, [filteredItems]);
-  const totalCities = useMemo(() => {
-    const set = new Set<string>();
-    filteredItems.forEach(c => c.cityCodes.forEach(cy => set.add(cy)));
-    return set.size;
-  }, [filteredItems]);
-  const totalDays = useMemo(() => {
-    return new Set(filteredItems.map(c => c.scheduleDate)).size;
-  }, [filteredItems]);
+  // Filter dropdown options (from all schedules)
+  const filterOptions = useMemo(() => {
+    const channels = new Set<string>();
+    const countries = new Set<string>();
+    (rawSchedules ?? []).forEach(s => channels.add(s.action_key));
+    (rawCampaigns ?? [])
+      .filter(c => c.status !== "rejected" && c.status !== "cancelled")
+      .forEach(c => { if (c.country) countries.add(c.country); });
+    return {
+      channels: Array.from(channels).sort(),
+      countries: Array.from(countries).sort(),
+    };
+  }, [rawCampaigns, rawSchedules]);
 
-  // Heat intensity helper
+  // ===== KPIs (from RPC) =====
+  const agg: AnalyticsAggregates = aggregates ?? EMPTY_AGGREGATES;
+  const kpis = agg.kpis;
+  const topDrivers = agg.top_drivers;
+
   const heatColor = (count: number, max: number): string => {
     if (count === 0) return "bg-slate-100";
     const intensity = count / max;
@@ -442,52 +378,28 @@ export default function AnalyticsView() {
           <button onClick={() => { setCountryFilter("all"); setChannelFilter("all"); }}
             className="text-xs text-red-500 hover:underline font-medium">Limpiar</button>
         )}
+        {aggregatesLoading && (
+          <span className="text-xs text-slate-400 ml-auto">Cargando métricas…</span>
+        )}
+        {aggregatesError && (
+          <span className="text-xs text-red-500 ml-auto">⚠ {aggregatesError}</span>
+        )}
       </div>
 
-      {/* Top KPIs */}
+      {/* Top KPIs (from RPC) */}
       <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
-        <KpiTile
-          label="Comunicaciones"
-          value={formatNumber(totalComms)}
-          hint="Comms programadas"
-          tone="default"
-        />
-        <KpiTile
-          label="Conductores"
-          value={formatNumber(totalDrivers)}
-          hint="Únicos impactados"
-          tone="default"
-        />
-        <KpiTile
-          label="Campañas"
-          value={formatNumber(totalCampaigns)}
-          hint={`${isAdmin ? "Total" : "Creadas por ti"}`}
-          tone="default"
-        />
-        <KpiTile
-          label="Países"
-          value={formatNumber(totalCountries)}
-          hint="Con actividad"
-          tone="default"
-        />
-        <KpiTile
-          label="Ciudades"
-          value={formatNumber(totalCities)}
-          hint="Con cobertura"
-          tone="default"
-        />
-        <KpiTile
-          label="Días activos"
-          value={formatNumber(totalDays)}
-          hint="Con comunicaciones"
-          tone="default"
-        />
+        <KpiTile label="Comunicaciones" value={formatNumber(kpis.total_comms)} hint="Comms programadas" />
+        <KpiTile label="Conductores" value={formatNumber(kpis.total_drivers)} hint="Únicos impactados" tone={kpis.total_drivers > 0 ? "success" : "default"} />
+        <KpiTile label="Campañas" value={formatNumber(kpis.total_campaigns)} hint={`${isAdmin ? "Total" : "Creadas por ti"}`} />
+        <KpiTile label="Países" value={formatNumber(kpis.total_countries)} hint="Con actividad" />
+        <KpiTile label="Ciudades" value={formatNumber(kpis.total_cities)} hint="Con cobertura" />
+        <KpiTile label="Días activos" value={formatNumber(kpis.total_days)} hint="Con comunicaciones" />
       </div>
 
       {/* Top Driver + Channel Usage */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Top drivers with most notifications */}
-        <Card title="Conductores con más notificaciones" subtitle="Top 10 por volumen total" icon={<Trophy size={18} className="text-amber-500" />}>
+        <Card title="Conductores con más notificaciones" subtitle="Top 10 por volumen total (server-side)" icon={<Trophy size={18} className="text-amber-500" />}>
           {topDrivers.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-6 text-center">Sin datos</p>
           ) : (
@@ -496,13 +408,13 @@ export default function AnalyticsView() {
                 const max = topDrivers[0]?.count || 1;
                 const pct = (d.count / max) * 100;
                 return (
-                  <div key={d.id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition">
+                  <div key={d.drv_id} className="flex items-center gap-3 p-2.5 rounded-lg hover:bg-slate-50 transition">
                     <div className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${idx === 0 ? "bg-amber-100 text-amber-700" : idx === 1 ? "bg-slate-200 text-slate-700" : idx === 2 ? "bg-orange-100 text-orange-700" : "bg-slate-100 text-slate-500"}`}>
                       {idx + 1}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center justify-between mb-1">
-                        <p className="text-xs font-mono font-bold text-slate-800 truncate">{d.id}</p>
+                        <p className="text-xs font-mono font-bold text-slate-800 truncate">{d.drv_id}</p>
                         <span className="text-sm font-bold text-slate-900 ml-2">{d.count}</span>
                       </div>
                       <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden">
@@ -541,7 +453,7 @@ export default function AnalyticsView() {
                       </div>
                       <div className="flex items-center gap-3 text-xs text-slate-600">
                         <span className="font-mono font-bold text-slate-900">{formatNumber(item.comms)}</span>
-                        <span className="text-slate-400">{item.drivers} DRV · {item.campaigns} camp</span>
+                        <span className="text-slate-400">{item.campaigns} camp</span>
                       </div>
                     </div>
                     <div className="h-2.5 bg-slate-100 rounded-full overflow-hidden">
@@ -627,7 +539,6 @@ export default function AnalyticsView() {
                     </div>
                     <div className="flex items-center gap-3 mt-1 text-[10px] text-slate-500">
                       <span>{w.days} día{w.days !== 1 ? "s" : ""}</span>
-                      <span>{formatNumber(w.drivers)} DRVs</span>
                       <div className="flex gap-0.5">
                         {Object.entries(w.channels).map(([ch, n]) => {
                           const cc = getChannelColor(ch);
@@ -737,15 +648,15 @@ export default function AnalyticsView() {
         </Card>
       </div>
 
-      {/* Drivers by Country + City */}
+      {/* Drivers by Country + City (from RPC) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card title="Conductores por país" subtitle="Conductores únicos impactados" icon={<Users size={18} className="text-blue-500" />}>
-          {driversByCountry.length === 0 ? (
+          {agg.drivers_by_country.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-6 text-center">Sin datos</p>
           ) : (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {driversByCountry.map(d => {
-                const max = Math.max(1, ...driversByCountry.map(x => x.count));
+              {agg.drivers_by_country.map(d => {
+                const max = Math.max(1, ...agg.drivers_by_country.map(x => x.count));
                 const pct = (d.count / max) * 100;
                 return (
                   <div key={d.country} className="p-3 rounded-lg border border-slate-100">
@@ -763,13 +674,13 @@ export default function AnalyticsView() {
           )}
         </Card>
 
-        <Card title="Conductores por ciudad" subtitle="Top 15 ciudades" icon={<Users size={18} className="text-cyan-500" />}>
-          {driversByCity.length === 0 ? (
+        <Card title="Conductores por ciudad" subtitle="Top ciudades con más conductores" icon={<Users size={18} className="text-cyan-500" />}>
+          {agg.drivers_by_city.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-6 text-center">Sin datos</p>
           ) : (
             <div className="space-y-1.5 max-h-[420px] overflow-y-auto">
-              {driversByCity.map(d => {
-                const max = driversByCity[0]?.count || 1;
+              {agg.drivers_by_city.map(d => {
+                const max = agg.drivers_by_city[0]?.count || 1;
                 const pct = (d.count / max) * 100;
                 return (
                   <div key={d.city} className="flex items-center gap-2 p-2 rounded hover:bg-slate-50">
@@ -793,15 +704,15 @@ export default function AnalyticsView() {
         </Card>
       </div>
 
-      {/* Campaigns by Country + City */}
+      {/* Campaigns by Country + City (from RPC) */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <Card title="Campañas por país" subtitle="Cantidad de campañas activas" icon={<Megaphone size={18} className="text-purple-500" />}>
-          {campaignsByCountry.length === 0 ? (
+          {agg.campaigns_by_country.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-6 text-center">Sin datos</p>
           ) : (
             <div className="space-y-2">
-              {campaignsByCountry.map(c => {
-                const max = Math.max(1, ...campaignsByCountry.map(x => x.campaigns));
+              {agg.campaigns_by_country.map(c => {
+                const max = Math.max(1, ...agg.campaigns_by_country.map(x => x.campaigns));
                 const pct = (c.campaigns / max) * 100;
                 return (
                   <div key={c.country} className="p-3 rounded-lg border border-slate-100">
@@ -823,13 +734,13 @@ export default function AnalyticsView() {
           )}
         </Card>
 
-        <Card title="Campañas por ciudad" subtitle="Top 15 ciudades" icon={<Megaphone size={18} className="text-indigo-500" />}>
-          {campaignsByCity.length === 0 ? (
+        <Card title="Campañas por ciudad" subtitle="Top ciudades con más campañas" icon={<Megaphone size={18} className="text-indigo-500" />}>
+          {agg.campaigns_by_city.length === 0 ? (
             <p className="text-sm text-slate-400 italic py-6 text-center">Sin datos</p>
           ) : (
             <div className="space-y-1.5 max-h-[420px] overflow-y-auto">
-              {campaignsByCity.map(c => {
-                const max = campaignsByCity[0]?.campaigns || 1;
+              {agg.campaigns_by_city.map(c => {
+                const max = agg.campaigns_by_city[0]?.campaigns || 1;
                 const pct = (c.campaigns / max) * 100;
                 return (
                   <div key={c.city} className="flex items-center gap-2 p-2 rounded hover:bg-slate-50">

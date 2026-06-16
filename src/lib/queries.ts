@@ -107,6 +107,50 @@ export async function fetchDashboardStats() {
   return data ?? null;
 }
 
+export type AnalyticsAggregates = {
+  kpis: {
+    total_comms: number;
+    total_drivers: number;
+    total_campaigns: number;
+    total_countries: number;
+    total_cities: number;
+    total_days: number;
+  };
+  top_drivers: Array<{
+    drv_id: string;
+    count: number;
+    channels: string[];
+    campaigns: string[];
+  }>;
+  drivers_by_country: Array<{ country: string; count: number }>;
+  drivers_by_city: Array<{ city: string; country: string; count: number }>;
+  campaigns_by_country: Array<{
+    country: string;
+    campaigns: number;
+    comms: number;
+    drivers: number;
+  }>;
+  campaigns_by_city: Array<{
+    city: string;
+    country: string;
+    campaigns: number;
+    drivers: number;
+  }>;
+  per_campaign_drivers: Array<{ campaign_id: string; drivers: number }>;
+};
+
+export async function fetchAnalyticsAggregates(
+  country: string = "all",
+  channel: string = "all",
+): Promise<AnalyticsAggregates | null> {
+  const { data, error } = await supabase.rpc("get_analytics_aggregates", {
+    p_country: country,
+    p_channel: channel,
+  });
+  if (error) throw error;
+  return (data as AnalyticsAggregates) ?? null;
+}
+
 export async function checkCohortConflictsRpc(
   drvIds: string[],
   country: string,

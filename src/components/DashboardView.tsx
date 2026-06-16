@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import type { CampaignRow, CampaignScheduleRow } from "@/lib/queries";
+import type { CampaignRow, CampaignScheduleRow, AnalyticsAggregates } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
-  Calendar, AlertTriangle, CheckCircle, FileText, Target,
+  Calendar, AlertTriangle, CheckCircle, FileText, Target, Users,
   Download, X, ChevronLeft, ChevronRight, Megaphone, List,
 } from "lucide-react";
 import AnalyticsView from "./AnalyticsView";
@@ -105,6 +105,27 @@ export default function DashboardView() {
     60_000,
     [],
   );
+
+  // Server-side driver count (admin only — falls back to 0 silently for non-admins)
+  const { data: aggregates } = useAutoRefresh(
+    async () => {
+      if (role !== "admin") return null;
+      try {
+        const { data, error } = await supabase.rpc("get_analytics_aggregates", {
+          p_country: "all",
+          p_channel: "all",
+        });
+        if (error) return null;
+        return (data as AnalyticsAggregates) ?? null;
+      } catch {
+        return null;
+      }
+    },
+    60_000,
+    [role],
+  );
+
+  const totalDriversCount = aggregates?.kpis.total_drivers ?? 0;
 
   const scheduleItems = useMemo((): ScheduleItem[] => {
     if (!rawCampaigns || !rawSchedules) return [];
@@ -339,9 +360,10 @@ export default function DashboardView() {
 
       {activeTab === "planning" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
             <KpiCard title="Programadas" value={scheduleItems.length} icon={<FileText size={24} className="text-blue-500" />} sub="Comunicaciones totales" />
             <KpiCard title="Aprobadas" value={approvedCount} icon={<CheckCircle size={24} className="text-green-500" />} sub="Auto + manual" />
+            <KpiCard title="Conductores" value={totalDriversCount.toLocaleString()} icon={<Users size={24} className="text-brand-500" />} sub="Únicos impactados" />
             <KpiCard title="Riesgo moderado" value={yellowConflicts} icon={<AlertTriangle size={24} className="text-amber-500" />} sub="Amarillo (<30%)" isWarning={yellowConflicts > 0} />
             <KpiCard title="Conflicto crítico" value={redConflicts} icon={<AlertTriangle size={24} className="text-red-500" />} sub="Rojo (>50%)" isDanger={redConflicts > 0} />
           </div>
