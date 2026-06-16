@@ -4,9 +4,10 @@ import { supabase } from "@/lib/supabase";
 import type { CampaignRow, CampaignScheduleRow } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
-  Calendar, AlertTriangle, CheckCircle, Users, FileText, Target,
+  Calendar, AlertTriangle, CheckCircle, FileText, Target,
   Download, X, ChevronLeft, ChevronRight, Megaphone, List,
 } from "lucide-react";
+import AnalyticsView from "./AnalyticsView";
 
 const TIME_SLOTS_30M: string[] = [];
 for (let h = 7; h < 22; h++) {
@@ -240,7 +241,6 @@ export default function DashboardView() {
   const redConflicts = conflicts.filter(c => c.severity === "red").length;
   const yellowConflicts = conflicts.filter(c => c.severity === "yellow").length;
   const approvedCount = scheduleItems.filter(c => c.status === "approved").length;
-  const totalDrivers = new Set(scheduleItems.flatMap(c => [...c.drvIds])).size;
 
   const filterOptions = useMemo(() => {
     const channels = new Set<string>(), teams = new Set<string>(), countries = new Set<string>();
@@ -603,53 +603,7 @@ export default function DashboardView() {
       )}
 
       {activeTab === "analytics" && isAdmin && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <KpiCard title="Total comms" value={scheduleItems.length} icon={<FileText size={24} className="text-blue-500" />} sub="Comunicaciones" />
-            <KpiCard title="Conductores" value={totalDrivers.toLocaleString()} icon={<Users size={24} className="text-brand-500" />} sub="Impactados" />
-            <KpiCard title="Días activos" value={allDates.length} icon={<Calendar size={24} className="text-brand-500" />} sub="Con comunicaciones" />
-            <KpiCard title="Conflictos" value={conflicts.filter(c => c.severity !== "green").length} icon={<AlertTriangle size={24} className="text-red-500" />} sub="Detectados" isDanger={conflicts.length > 0} />
-          </div>
-
-          <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h3 className="font-bold text-slate-800 mb-4 flex items-center gap-2 text-sm">
-              <Megaphone size={18} className="text-brand-500" /> Análisis por campaña
-            </h3>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-slate-100 text-left text-xs text-slate-500 uppercase font-semibold">
-                    <th className="py-2 px-3">Campaña</th>
-                    <th className="py-2 px-3">Canales</th>
-                    <th className="py-2 px-3">País</th>
-                    <th className="py-2 px-3">Equipo</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {(rawCampaigns ?? []).filter(c => c.status !== "rejected" && c.status !== "cancelled").slice(0, 20).map(camp => {
-                    const campItems = scheduleItems.filter(s => s.name === camp.name);
-                    const channels = [...new Set(campItems.map(c => c.actionKey))];
-                    return (
-                      <tr key={camp.id} className="border-b border-slate-50 last:border-0 hover:bg-slate-50 transition">
-                        <td className="py-2.5 px-3 font-semibold text-slate-800">{shortName(camp.name)}</td>
-                        <td className="py-2.5 px-3">
-                          <div className="flex flex-wrap gap-1">
-                            {channels.map(ch => {
-                              const cc = getChannelColor(ch);
-                              return <span key={ch} className={`px-1.5 py-0.5 text-xs rounded ${cc.bg} ${cc.text}`}>{ch}</span>;
-                            })}
-                          </div>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600">{camp.country}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{camp.team}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
+        <AnalyticsView />
       )}
 
       {inspectorConflict && (
