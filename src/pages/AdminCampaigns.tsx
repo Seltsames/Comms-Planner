@@ -9,24 +9,6 @@ import {
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/features/cohorts/parser";
 
-type CampaignRow = {
-  id: string;
-  name: string;
-  team: string;
-  sub_team: string | null;
-  types: string[];
-  country: string;
-  city_codes: string[];
-  start_date: string;
-  end_date: string;
-  status: string;
-  action_keys: string[];
-  csv_file_name: string | null;
-  creator_id: string;
-  created_at: string;
-  updated_at: string;
-};
-
 export default function AdminCampaigns() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);

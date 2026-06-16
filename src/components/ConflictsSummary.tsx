@@ -6,7 +6,7 @@ interface Conflict {
   actionKey: string;
 }
 
-interface ChannelConflicts {
+export interface ChannelConflicts {
   conflicts: Conflict[];
   atRiskCount: number;
   lockedCount: number;
