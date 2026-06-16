@@ -146,6 +146,26 @@ export type Database = {
       approve_campaign: { Args: { p_campaign_id: string }; Returns: boolean };
       reject_campaign: { Args: { p_campaign_id: string }; Returns: boolean };
       delete_campaign_hard: { Args: { p_campaign_id: string }; Returns: boolean };
+      get_slot_availability_v2: {
+        Args: {
+          p_country: string;
+          p_city_codes: string[];
+          p_start_date: string;
+          p_end_date: string;
+          p_action_keys: string[];
+          p_drv_ids: string[];
+        };
+        Returns: {
+          action_key: string;
+          schedule_date: string;
+          time_slot: string;
+          severity: string;
+          day_locked: boolean | null;
+          day_lock_reason: string | null;
+          conflicting_drivers: number | null;
+          total_schedules: number | null;
+        }[];
+      };
       save_campaign_v2: {
         Args: {
           p_action_keys: string[]; p_audience: Json; p_city_codes: string[];

@@ -17,9 +17,11 @@ import {
   type CohortState,
 } from "@/features/cohorts/CohortUploader";
 import { CohortConflictPreview } from "@/features/cohorts/CohortConflictPreview";
-import { saveCampaignRpc } from "@/lib/queries";
+import { saveCampaignRpc, fetchCampaignById } from "@/lib/queries";
 import { TimeSlotPicker } from "@/components/TimeSlotPicker";
 import { ScheduledCommsPreview, type ScheduledComm } from "@/components/ScheduledCommsPreview";
+import { SaveSuccessModal } from "@/components/SaveSuccessModal";
+import { ConflictsSummary, type ChannelConflicts } from "@/components/ConflictsSummary";
 import DashboardView from "@/components/DashboardView";
 
 type Tab = "builder" | "dashboard";
@@ -61,8 +63,14 @@ export default function Index() {
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [savedCampaign, setSavedCampaign] = useState<{
+    id: string;
+    status: string;
+    name: string;
+  } | null>(null);
 
   const [slotSelection, setSlotSelection] = useState<Record<string, Record<string, string>>>({});
+  const [channelConflicts, setChannelConflicts] = useState<Record<string, ChannelConflicts>>({});
 
   useEffect(() => {
     if (!citiesOpen) return;
@@ -245,7 +253,7 @@ export default function Index() {
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      await saveCampaignRpc({
+      const campaignId = await saveCampaignRpc({
         name,
         team,
         subTeam,
@@ -260,13 +268,33 @@ export default function Index() {
         schedules: buildSchedules(),
         audience: buildAudience(),
       });
+      const saved = await fetchCampaignById(campaignId);
+      if (saved) {
+        setSavedCampaign({ id: saved.id, status: saved.status, name: saved.name });
+      }
       setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 4000);
     } catch (e: unknown) {
       setSaveError(e instanceof Error ? e.message : "Error guardando campaña");
     } finally {
       setSaveLoading(false);
     }
+  }
+
+  function resetBuilder() {
+    setName("");
+    setSubTeam("");
+    setCityCodes([]);
+    setIsRange(false);
+    setStartDate(todayISO());
+    setEndDate(todayISO());
+    setCohort({ general: null, byCity: {} });
+    setActionKeys([]);
+    setSlotSelection({});
+    setChannelConflicts({});
+    setSaveError(null);
+    setSaveSuccess(false);
+    setStep(1);
+    setCitySearch("");
   }
 
   return (
@@ -639,11 +667,24 @@ export default function Index() {
                         isPope={isPope}
                         isRangeOnly={isRangeOnly}
                         blockedDates={blockedDates}
+                        drvIds={effectiveDrvIds}
+                        onConflictsChange={(conflicts, counts) => {
+                          setChannelConflicts((prev) => ({
+                            ...prev,
+                            [actionKey]: {
+                              conflicts,
+                              atRiskCount: counts?.atRiskCount ?? 0,
+                              lockedCount: counts?.lockedCount ?? 0,
+                            },
+                          }));
+                        }}
                       />
                     );
                   })}
                 </div>
               )}
+
+              <ConflictsSummary channelConflicts={channelConflicts} />
 
               <div className="mt-6">
                 <ScheduledCommsPreview items={scheduledComms} />
@@ -684,6 +725,20 @@ export default function Index() {
         </div>
       ) : (
         <DashboardView />
+      )}
+
+      {savedCampaign && (
+        <SaveSuccessModal
+          campaignId={savedCampaign.id}
+          campaignStatus={savedCampaign.status}
+          campaignName={savedCampaign.name}
+          scheduledComms={scheduledComms}
+          onClose={() => {
+            setSavedCampaign(null);
+            resetBuilder();
+            setTimeout(() => setSaveSuccess(false), 4000);
+          }}
+        />
       )}
     </div>
   );

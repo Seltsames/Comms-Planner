@@ -21,6 +21,37 @@ export async function getSlotAvailability(
   return data as SlotAvailability[];
 }
 
+export type SlotAvailabilityV2 = {
+  action_key: string;
+  schedule_date: string;
+  time_slot: string;
+  severity: "green" | "yellow" | "red";
+  day_locked: boolean | null;
+  day_lock_reason: string | null;
+  conflicting_drivers: number | null;
+  total_schedules: number | null;
+};
+
+export async function getSlotAvailabilityV2(
+  country: string,
+  cityCodes: string[],
+  startDate: string,
+  endDate: string,
+  actionKeys: string[],
+  drvIds: string[],
+): Promise<SlotAvailabilityV2[]> {
+  const { data, error } = await supabase.rpc("get_slot_availability_v2", {
+    p_country: country,
+    p_city_codes: cityCodes,
+    p_start_date: startDate,
+    p_end_date: endDate,
+    p_action_keys: actionKeys,
+    p_drv_ids: drvIds,
+  });
+  if (error) throw error;
+  return (data ?? []) as SlotAvailabilityV2[];
+}
+
 export type CampaignRow = Database["public"]["Tables"]["campaigns"]["Row"];
 export type CampaignScheduleRow =
   Database["public"]["Tables"]["campaign_schedules"]["Row"];
@@ -136,4 +167,15 @@ export async function saveCampaignRpc(params: {
   });
   if (error) throw error;
   return data as string;
+}
+
+export async function fetchCampaignById(id: string): Promise<CampaignRow | null> {
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("*")
+    .eq("id", id)
+    .is("deleted_at", null)
+    .single();
+  if (error) throw error;
+  return data as CampaignRow;
 }
