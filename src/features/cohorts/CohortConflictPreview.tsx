@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { checkCohortConflictsRpc } from "@/lib/queries";
-import { formatNumber } from "@/features/cohorts/parser";
+import { formatNumber } from "@/lib/format";
+import type { AudienceKind } from "@/lib/auth";
 
 export interface ConflictEntry {
   campaign_id: string;
@@ -8,7 +9,7 @@ export interface ConflictEntry {
   schedule_date: string;
   time_slot: string;
   action_key: string;
-  conflicting_drv_count: number;
+  conflicting_count: number;
 }
 
 interface CohortConflictPreviewProps {
@@ -16,6 +17,7 @@ interface CohortConflictPreviewProps {
   country: string;
   startDate: string;
   endDate: string;
+  kind: AudienceKind;
 }
 
 export function CohortConflictPreview({
@@ -23,6 +25,7 @@ export function CohortConflictPreview({
   country,
   startDate,
   endDate,
+  kind,
 }: CohortConflictPreviewProps) {
   const [conflicts, setConflicts] = useState<ConflictEntry[]>([]);
   const [loading, setLoading] = useState(false);
@@ -38,9 +41,20 @@ export function CohortConflictPreview({
     setLoading(true);
     setError(null);
 
-    checkCohortConflictsRpc(drvIds, country, startDate, endDate)
+    checkCohortConflictsRpc(drvIds, country, startDate, endDate, kind)
       .then((result) => {
-        if (!cancelled) setConflicts(result);
+        if (cancelled) return;
+        // RPC returns conflicting_drv_count OR conflicting_pax_count depending on kind.
+        setConflicts(
+          result.map((r) => ({
+            campaign_id: r.campaign_id,
+            campaign_name: r.campaign_name,
+            schedule_date: r.schedule_date,
+            time_slot: r.time_slot,
+            action_key: r.action_key,
+            conflicting_count: (r.conflicting_drv_count ?? r.conflicting_pax_count ?? 0),
+          })),
+        );
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : "Error consultando conflictos");
@@ -52,7 +66,7 @@ export function CohortConflictPreview({
     return () => {
       cancelled = true;
     };
-  }, [drvIds.join(","), country, startDate, endDate]);
+  }, [drvIds.join(","), country, startDate, endDate, kind]);
 
   if (drvIds.length === 0) return null;
 
@@ -92,7 +106,7 @@ export function CohortConflictPreview({
                   </span>
                 </div>
                 <span className="ml-2 shrink-0 rounded-full bg-red-500 px-2.5 py-0.5 text-xs font-bold text-white">
-                  {formatNumber(c.conflicting_drv_count)} DRVs
+                  {formatNumber(c.conflicting_count)} {kind === "pax" ? "pasajeros" : "DRVs"}
                 </span>
               </div>
             ))}

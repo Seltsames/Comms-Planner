@@ -1,13 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, PageHeader } from "@/components/Ui";
-import { useAuth } from "@/lib/auth";
 import {
   ACTION_KEYS_BY_TYPE,
-  CITIES_DATA,
   COMM_TYPES,
+  CITIES_DATA,
   COUNTRIES,
-  TEAMS,
-  TEAMS_HIERARCHY,
+  TEAMS_BY_KIND,
   type CommType,
   type Country,
 } from "@/lib/constants";
@@ -23,42 +21,18 @@ import { ScheduledCommsPreview, type ScheduledComm } from "@/components/Schedule
 import { SaveSuccessModal } from "@/components/SaveSuccessModal";
 import { ConflictsSummary, type ChannelConflicts } from "@/components/ConflictsSummary";
 import DashboardView from "@/components/DashboardView";
-
-type Tab = "builder" | "dashboard";
+import { useAuth } from "@/lib/auth";
+import { useCampaignBuilder } from "@/lib/campaignBuilder";
 
 function extractUsername(email: string) {
   if (!email) return "";
-  return email.replace(/@didiglobal\.com$/i, "").replace(/@.*$/, "");
+  const at = email.indexOf("@");
+  return at > 0 ? email.slice(0, at) : email;
 }
-
-function todayISO() {
-  return new Date().toISOString().split("T")[0];
-}
-
-
 
 export default function Index() {
   const { user } = useAuth();
-  const [tab, setTab] = useState<Tab>("builder");
-  const [step, setStep] = useState<1 | 2>(1);
-
-  const [name, setName] = useState("");
-  const [team, setTeam] = useState<string>(TEAMS[0]);
-  const [subTeam, setSubTeam] = useState<string>("");
-  const [country, setCountry] = useState<Country>(COUNTRIES[0]);
-  const [types, setTypes] = useState<CommType[]>([COMM_TYPES.POPE]);
-  const [cityCodes, setCityCodes] = useState<string[]>([]);
-  const [isRange, setIsRange] = useState(false);
-  const [startDate, setStartDate] = useState<string>(todayISO());
-  const [endDate, setEndDate] = useState<string>(todayISO());
-
-  const [citiesOpen, setCitiesOpen] = useState(false);
-  const [citySearch, setCitySearch] = useState("");
-  const citiesRef = useRef<HTMLDivElement>(null);
-
-  const [actionKeys, setActionKeys] = useState<string[]>([]);
-
-  const [cohort, setCohort] = useState<CohortState>({ general: null, byCity: {} });
+  const { kind, state, setState, reset, scheduledComms, setScheduledComms } = useCampaignBuilder();
 
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -69,8 +43,16 @@ export default function Index() {
     name: string;
   } | null>(null);
 
-  const [slotSelection, setSlotSelection] = useState<Record<string, Record<string, string>>>({});
+  const [citiesOpen, setCitiesOpen] = useState(false);
+  const [citySearch, setCitySearch] = useState("");
+  const citiesRef = useRef<HTMLDivElement>(null);
+
   const [channelConflicts, setChannelConflicts] = useState<Record<string, ChannelConflicts>>({});
+
+  const {
+    name, team, subTeam, country, types, cityCodes, isRange,
+    startDate, endDate, cohort, actionKeys, slotSelection, step, activeTab,
+  } = state;
 
   useEffect(() => {
     if (!citiesOpen) return;
@@ -83,9 +65,10 @@ export default function Index() {
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [citiesOpen]);
 
+  const teamsForKind = TEAMS_BY_KIND[kind];
   const subTeams = useMemo(
-    () => TEAMS_HIERARCHY.find((t) => t.team === team)?.subTeams ?? [],
-    [team],
+    () => teamsForKind.find((t) => t.team === team)?.subTeams ?? [],
+    [teamsForKind, team],
   );
 
   const availableActionKeys = useMemo(
@@ -99,13 +82,13 @@ export default function Index() {
   );
 
   const nomenclature = useMemo(() => {
-    const parts = ["DRV MKT"];
+    const parts = [kind === "pax" ? "PAX MKT" : "DRV MKT"];
     if (country) parts.push(country);
     if (team) parts.push(team);
     if (subTeam) parts.push(subTeam);
     if (name) parts.push(name);
     return parts.join("_");
-  }, [country, team, subTeam, name]);
+  }, [kind, country, team, subTeam, name]);
 
   const countryCities = useMemo(
     () => CITIES_DATA.filter((c) => c.country === country),
@@ -137,13 +120,34 @@ export default function Index() {
     return { canProceed: missing.length === 0, missingFields: missing };
   }, [name, subTeam, subTeams.length, types.length, cityCodes.length, isRange, startDate, endDate, effectiveDrvIds.length, cohort]);
 
+  // ------------------------------------------------------------------------
+  // Mutators (kept inside Index.tsx so they update the context state slice)
+  // ------------------------------------------------------------------------
+  const setName = (v: string) => setState((s) => ({ ...s, name: v }));
+  const setTeam = (newTeam: string) =>
+    setState((s) => ({ ...s, team: newTeam, subTeam: "" }));
+  const setSubTeam = (v: string) => setState((s) => ({ ...s, subTeam: v }));
+  const setCountry = (newCountry: Country) =>
+    setState((s) => ({ ...s, country: newCountry, cityCodes: [], cohort: { general: null, byCity: {} } }));
+  const setStartDate = (v: string) => setState((s) => ({ ...s, startDate: v }));
+  const setEndDate = (v: string) => setState((s) => ({ ...s, endDate: v }));
+  const setIsRange = (v: boolean) => setState((s) => ({ ...s, isRange: v }));
+  const setCohort = (v: CohortState) => setState((s) => ({ ...s, cohort: v }));
+  const setActionKeys = (v: string[] | ((prev: string[]) => string[])) =>
+    setState((s) => ({ ...s, actionKeys: typeof v === "function" ? v(s.actionKeys) : v }));
+  const setSlotSelection = (
+    v: Record<string, Record<string, string>> | ((prev: Record<string, Record<string, string>>) => Record<string, Record<string, string>>),
+  ) => setState((s) => ({ ...s, slotSelection: typeof v === "function" ? v(s.slotSelection) : v }));
+  const setStep = (v: 1 | 2) => setState((s) => ({ ...s, step: v }));
+  const setActiveTab = (v: "builder" | "dashboard") => setState((s) => ({ ...s, activeTab: v }));
+
   function toggleType(value: CommType) {
-    setTypes((prev) => {
-      if (prev.includes(value)) {
-        if (prev.length === 1) return prev;
-        return prev.filter((t) => t !== value);
+    setState((s) => {
+      if (s.types.includes(value)) {
+        if (s.types.length === 1) return s;
+        return { ...s, types: s.types.filter((t) => t !== value) };
       }
-      return [...prev, value];
+      return { ...s, types: [...s.types, value] };
     });
   }
   function isTypeLocked(value: CommType) {
@@ -163,38 +167,31 @@ export default function Index() {
     });
   }
   function toggleCity(cityId: string) {
-    setCityCodes((prev) =>
-      prev.includes(cityId) ? prev.filter((c) => c !== cityId) : [...prev, cityId],
-    );
+    setState((s) => ({
+      ...s,
+      cityCodes: s.cityCodes.includes(cityId)
+        ? s.cityCodes.filter((c) => c !== cityId)
+        : [...s.cityCodes, cityId],
+    }));
   }
   function handleAllCities() {
     if (allCountryCitiesSelected) {
       const countryIds = new Set(countryCities.map((c) => c.id));
-      setCityCodes((prev) => prev.filter((id) => !countryIds.has(id)));
+      setState((s) => ({ ...s, cityCodes: s.cityCodes.filter((id) => !countryIds.has(id)) }));
     } else {
       const merged = new Set([...cityCodes, ...countryCities.map((c) => c.id)]);
-      setCityCodes(Array.from(merged));
+      setState((s) => ({ ...s, cityCodes: Array.from(merged) }));
     }
-  }
-  function handleCountryChange(newCountry: Country) {
-    setCountry(newCountry);
-    setCityCodes([]);
-    setCitySearch("");
-    setCohort({ general: null, byCity: {} });
-  }
-  function handleTeamChange(newTeam: string) {
-    setTeam(newTeam);
-    setSubTeam("");
   }
 
   function buildAudience() {
-    const audience: Array<{ drv_id: string; city_code: string | null }> = [];
+    const audience: Array<{ id: string; city_code: string | null }> = [];
     for (const code of cityCodes) {
       const perCity = cohort.byCity[code];
       const source = perCity ?? cohort.general;
       if (!source) continue;
       for (const drvId of source.validIds) {
-        audience.push({ drv_id: drvId, city_code: perCity ? code : null });
+        audience.push({ id: drvId, city_code: perCity ? code : null });
       }
     }
     return audience;
@@ -226,7 +223,9 @@ export default function Index() {
     });
   }
 
-  const scheduledComms = useMemo((): ScheduledComm[] => {
+  // Recompute scheduledComms preview whenever slotSelection changes. Stored
+  // in the context so it survives navigation away from the builder.
+  useEffect(() => {
     const items: ScheduledComm[] = [];
     for (const [actionKey, slots] of Object.entries(slotSelection)) {
       for (const [key, timeVal] of Object.entries(slots)) {
@@ -244,8 +243,9 @@ export default function Index() {
         });
       }
     }
-    return items.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
-  }, [slotSelection, nomenclature, types, effectiveDrvIds.length, country]);
+    items.sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time));
+    setScheduledComms(items);
+  }, [slotSelection, nomenclature, types, effectiveDrvIds.length, country, setScheduledComms]);
 
   async function handleSave() {
     if (!user?.id) return;
@@ -253,22 +253,25 @@ export default function Index() {
     setSaveError(null);
     setSaveSuccess(false);
     try {
-      const campaignId = await saveCampaignRpc({
-        name,
-        team,
-        subTeam,
-        types,
-        actionKeys,
-        country,
-        cityCodes,
-        csvFileName: `cohort_${nomenclature}.csv`,
-        startDate,
-        endDate: isRange ? endDate : startDate,
-        status: "pending",
-        schedules: buildSchedules(),
-        audience: buildAudience(),
-      });
-      const saved = await fetchCampaignById(campaignId);
+      const campaignId = await saveCampaignRpc(
+        {
+          name,
+          team,
+          subTeam,
+          types,
+          actionKeys,
+          country,
+          cityCodes,
+          csvFileName: `cohort_${nomenclature}.csv`,
+          startDate,
+          endDate: isRange ? endDate : startDate,
+          status: "pending",
+          schedules: buildSchedules(),
+          audience: buildAudience(),
+        },
+        kind,
+      );
+      const saved = await fetchCampaignById(campaignId, kind);
       if (saved) {
         setSavedCampaign({ id: saved.id, status: saved.status, name: saved.name });
       }
@@ -281,41 +284,31 @@ export default function Index() {
   }
 
   function resetBuilder() {
-    setName("");
-    setSubTeam("");
-    setCityCodes([]);
-    setIsRange(false);
-    setStartDate(todayISO());
-    setEndDate(todayISO());
-    setCohort({ general: null, byCity: {} });
-    setActionKeys([]);
-    setSlotSelection({});
+    reset();
     setChannelConflicts({});
     setSaveError(null);
     setSaveSuccess(false);
-    setStep(1);
-    setCitySearch("");
   }
 
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <PageHeader
-        title="Planificar comunicación"
+        title={`Planificar comunicación · ${kind === "pax" ? "Pasajeros" : "Conductores"}`}
         subtitle={`Bienvenido, ${user?.fullName ?? "—"} · Define, programa y revisa conflictos`}
         action={
           <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 text-sm shadow-sm">
             <button
-              onClick={() => setTab("builder")}
+              onClick={() => setActiveTab("builder")}
               className={`rounded-lg px-4 py-1.5 font-semibold transition ${
-                tab === "builder" ? "bg-brand-500 text-white" : "text-slate-600"
+                activeTab === "builder" ? "bg-brand-500 text-white" : "text-slate-600"
               }`}
             >
               Builder
             </button>
             <button
-              onClick={() => setTab("dashboard")}
+              onClick={() => setActiveTab("dashboard")}
               className={`rounded-lg px-4 py-1.5 font-semibold transition ${
-                tab === "dashboard" ? "bg-brand-500 text-white" : "text-slate-600"
+                activeTab === "dashboard" ? "bg-brand-500 text-white" : "text-slate-600"
               }`}
             >
               Dashboard
@@ -324,14 +317,14 @@ export default function Index() {
         }
       />
 
-      {tab === "builder" ? (
+      {activeTab === "builder" ? (
         <div className="space-y-6 pb-32">
           <Stepper step={step} />
 
           {step === 1 ? (
             <Card
               title="Configurar campaña"
-              subtitle="Define el público objetivo y carga los cohortes"
+              subtitle={`Define el público objetivo y carga los cohortes (${kind === "pax" ? "pasajeros" : "conductores"})`}
             >
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
                 <Field label="Usuario" full>
@@ -344,7 +337,7 @@ export default function Index() {
                   <input
                     value={name}
                     onChange={(e) => setName(e.target.value)}
-                    placeholder="Ej. Retención semanal conductores"
+                    placeholder="Ej. Retención semanal"
                     className={inputClass}
                   />
                 </Field>
@@ -352,11 +345,11 @@ export default function Index() {
                 <Field label="Equipo">
                   <select
                     value={team}
-                    onChange={(e) => handleTeamChange(e.target.value)}
+                    onChange={(e) => setTeam(e.target.value)}
                     className={inputClass}
                   >
-                    {TEAMS.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                    {teamsForKind.map((t) => (
+                      <option key={t.team} value={t.team}>{t.team}</option>
                     ))}
                   </select>
                 </Field>
@@ -455,7 +448,7 @@ export default function Index() {
                 <Field label="País" full>
                   <select
                     value={country}
-                    onChange={(e) => handleCountryChange(e.target.value as Country)}
+                    onChange={(e) => setCountry(e.target.value as Country)}
                     className={inputClass}
                   >
                     {COUNTRIES.map((c) => (
@@ -503,7 +496,7 @@ export default function Index() {
                           {cityCodes.length > 0 && (
                             <button
                               type="button"
-                              onClick={() => setCityCodes([])}
+                              onClick={() => setState((s) => ({ ...s, cityCodes: [] }))}
                               className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-medium text-slate-500 transition hover:border-red-300 hover:text-red-600"
                             >
                               Limpiar
@@ -571,12 +564,13 @@ export default function Index() {
                   )}
                 </Field>
 
-                <Field label="Cohortes (DRV IDs)" full>
+                <Field label={`Cohortes (${kind === "pax" ? "PAX" : "DRV"} IDs)`} full>
                   <CohortUploader
                     country={country}
                     selectedCityCodes={cityCodes}
                     value={cohort}
                     onChange={setCohort}
+                    kind={kind}
                   />
                 </Field>
               </div>
@@ -588,6 +582,7 @@ export default function Index() {
                     country={country}
                     startDate={startDate}
                     endDate={isRange ? endDate : startDate}
+                    kind={kind}
                   />
                 </div>
               )}
@@ -667,7 +662,8 @@ export default function Index() {
                         isPope={isPope}
                         isRangeOnly={isRangeOnly}
                         blockedDates={blockedDates}
-                        drvIds={effectiveDrvIds}
+                        audienceIds={effectiveDrvIds}
+                        kind={kind}
                         onConflictsChange={(conflicts, counts) => {
                           setChannelConflicts((prev) => ({
                             ...prev,
@@ -724,7 +720,7 @@ export default function Index() {
           )}
         </div>
       ) : (
-        <DashboardView />
+        <DashboardView kind={kind} />
       )}
 
       {savedCampaign && (

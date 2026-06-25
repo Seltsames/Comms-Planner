@@ -33,4 +33,5 @@ export type CohortParseRequest = {
   mode: CohortMode;
   cityCode: string | null;
   cityName: string | null;
+  regexSource?: string;
 };

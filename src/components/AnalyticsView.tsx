@@ -1,7 +1,12 @@
 import { useMemo, useState } from "react";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type AudienceKind } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import type { CampaignRow, CampaignScheduleRow, AnalyticsAggregates } from "@/lib/queries";
+import {
+  fetchAllCampaigns,
+  fetchCampaignSchedules,
+  type CampaignRow,
+  type AnalyticsAggregates,
+} from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
   Users, Calendar, Megaphone, BarChart3, MapPin,
@@ -9,19 +14,8 @@ import {
   Search, Download, Clock,
 } from "lucide-react";
 import { CITIES_DATA } from "@/lib/constants";
-
-const CHANNEL_COLORS: Record<string, { bg: string; border: string; text: string; dot: string; hex: string }> = {
-  "Pop Up": { bg: "bg-blue-500/15", border: "border-blue-500/30", text: "text-blue-600", dot: "bg-blue-500", hex: "#3b82f6" },
-  XPanel: { bg: "bg-purple-500/15", border: "border-purple-500/30", text: "text-purple-600", dot: "bg-purple-500", hex: "#a855f7" },
-  Whatsapp: { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-600", dot: "bg-emerald-500", hex: "#10b981" },
-  "Push in/out": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400", hex: "#fbbf24" },
-  "Push in": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400", hex: "#fbbf24" },
-  "Push out": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400", hex: "#fbbf24" },
-  Email: { bg: "bg-pink-500/15", border: "border-pink-500/30", text: "text-pink-600", dot: "bg-pink-500", hex: "#ec4899" },
-  SMS: { bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600", dot: "bg-slate-400", hex: "#94a3b8" },
-};
-const getChannelColor = (actionKey: string) =>
-  CHANNEL_COLORS[actionKey] ?? { bg: "bg-brand-500/10", border: "border-brand-500/20", text: "text-brand-600", dot: "bg-brand-500", hex: "#6366f1" };
+import { formatNumber } from "@/lib/format";
+import { getChannelColor } from "@/lib/channelStyles";
 
 const HOURS: number[] = Array.from({ length: 24 }, (_, i) => i);
 
@@ -47,10 +41,6 @@ function getIsoWeek(dateStr: string): { week: string; weekLabel: string } {
   const weekKey = monday.toISOString().split("T")[0];
   const weekLabel = monday.toLocaleDateString("es-MX", { day: "2-digit", month: "short" });
   return { week: weekKey, weekLabel };
-}
-
-function formatNumber(n: number): string {
-  return n.toLocaleString("es-MX");
 }
 
 interface ScheduleItem {
@@ -89,7 +79,7 @@ const EMPTY_AGGREGATES: AnalyticsAggregates = {
   per_campaign_drivers: [],
 };
 
-export default function AnalyticsView() {
+export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
   const { role } = useAuth();
   const isAdmin = role === "admin";
 
@@ -102,10 +92,10 @@ export default function AnalyticsView() {
   const { data: aggregates, loading: aggregatesLoading, error: aggregatesError } = useAutoRefresh(
     async () => {
       try {
-        const { data, error } = await supabase.rpc("get_analytics_aggregates", {
-          p_country: countryFilter,
-          p_channel: channelFilter,
-        });
+        const { data, error } = await supabase.rpc(
+          kind === "pax" ? "get_analytics_aggregates_pax" : "get_analytics_aggregates",
+          { p_country: countryFilter, p_channel: channelFilter },
+        );
         if (error) throw error;
         return (data as AnalyticsAggregates) ?? null;
       } catch (err) {
@@ -114,29 +104,20 @@ export default function AnalyticsView() {
       }
     },
     60_000,
-    [countryFilter, channelFilter],
+    [countryFilter, channelFilter, kind],
   );
 
   // ===== Lightweight client-side data (small tables, no audience) =====
   const { data: rawCampaigns } = useAutoRefresh(
-    async () => {
-      const { data } = await supabase
-        .from("campaigns")
-        .select("*")
-        .is("deleted_at", null);
-      return (data as CampaignRow[]) ?? null;
-    },
+    () => fetchAllCampaigns(kind),
     60_000,
-    [],
+    [kind],
   );
 
   const { data: rawSchedules } = useAutoRefresh(
-    async () => {
-      const { data } = await supabase.from("campaign_schedules").select("*");
-      return (data as CampaignScheduleRow[]) ?? null;
-    },
+    () => fetchCampaignSchedules(kind),
     60_000,
-    [],
+    [kind],
   );
 
   // Build per-campaign driver count lookup from RPC

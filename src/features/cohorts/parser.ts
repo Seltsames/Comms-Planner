@@ -4,6 +4,7 @@ import type {
   CohortParseRequest,
   CohortResult,
 } from "./types";
+import { formatBytes, formatNumber } from "@/lib/format";
 
 export interface ParseCohortOptions extends Omit<CohortParseRequest, "file"> {
   file: File;
@@ -15,6 +16,7 @@ export function parseCohortCsv({
   mode,
   cityCode,
   cityName,
+  regexSource,
   onProgress,
 }: ParseCohortOptions): Promise<CohortResult> {
   return new Promise((resolve, reject) => {
@@ -40,16 +42,8 @@ export function parseCohortCsv({
       reject(new Error(err.message || "Worker error"));
     };
 
-    worker.postMessage({ file, mode, cityCode, cityName } satisfies CohortParseRequest);
+    worker.postMessage({ file, mode, cityCode, cityName, regexSource } satisfies CohortParseRequest);
   });
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
-export function formatNumber(n: number): string {
-  return n.toLocaleString("es-MX");
-}
+export { formatBytes, formatNumber };

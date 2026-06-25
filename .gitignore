@@ -21,6 +21,7 @@ node_modules
 dist
 dist-ssr
 .vite
+*.tsbuildinfo
 
 # Env files
 .env

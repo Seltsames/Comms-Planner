@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { Clock, Check, AlertTriangle, Ban, ChevronDown, ChevronUp, Sun, Lock } from "lucide-react";
 import { getSlotAvailabilityV2, type SlotAvailabilityV2 } from "@/lib/queries";
+import type { AudienceKind } from "@/lib/auth";
 
 export const TIME_SLOTS_30M: string[] = [];
 for (let h = 7; h <= 22; h++) {
@@ -19,7 +20,8 @@ interface TimeSlotPickerProps {
   isPope: boolean;
   isRangeOnly: boolean;
   blockedDates: Set<string>;
-  drvIds: string[];
+  audienceIds: string[];
+  kind: AudienceKind;
   onConflictsChange?: (
     conflicts: Array<{ date: string; reason: string; actionKey: string }>,
     counts?: { atRiskCount: number; lockedCount: number },
@@ -71,7 +73,8 @@ export function TimeSlotPicker({
   isPope,
   isRangeOnly,
   blockedDates,
-  drvIds,
+  audienceIds,
+  kind,
   onConflictsChange,
 }: TimeSlotPickerProps) {
   const [isOpen, setIsOpen] = useState(true);
@@ -94,7 +97,7 @@ export function TimeSlotPicker({
   useEffect(() => {
     let cancelled = false;
     setLoadingSlots(true);
-    getSlotAvailabilityV2(country, cityCodes, startDate, endDate, [actionKey], drvIds)
+    getSlotAvailabilityV2(country, cityCodes, startDate, endDate, [actionKey], audienceIds, kind)
       .then((slots) => {
         if (cancelled) return;
         const map: Record<string, SlotAvailabilityV2> = {};
@@ -134,7 +137,7 @@ export function TimeSlotPicker({
     return () => {
       cancelled = true;
     };
-  }, [country, cityCodes, startDate, endDate, actionKey, drvIds.join(",")]);
+  }, [country, cityCodes, startDate, endDate, actionKey, audienceIds.join(","), kind]);
 
   const makeKey = (date: string, slot: string) => `${date}|${slot}`;
   const isSelected = (date: string, slot: string) => !!selectedSlots[makeKey(date, slot)];

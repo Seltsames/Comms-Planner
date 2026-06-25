@@ -10,6 +10,9 @@ import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "./supabase";
 
 export type Role = "admin" | "normal";
+export type AudienceKind = "drv" | "pax";
+
+export const AUDIENCE_KINDS: readonly AudienceKind[] = ["drv", "pax"] as const;
 
 export interface AuthUser {
   id: string;
@@ -24,15 +27,24 @@ interface AuthContextValue {
   role: Role | null;
   isEnabled: boolean;
   loading: boolean;
-  signInWithGoogle: () => Promise<{ error: string | null; url?: string }>;
+  audienceKind: AudienceKind;
+  setAudienceKind: (kind: AudienceKind) => void;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+const AUDIENCE_STORAGE_KEY = "commplanner.audience_kind";
+
+function readStoredAudienceKind(): AudienceKind {
+  if (typeof window === "undefined") return "drv";
+  const raw = window.localStorage.getItem(AUDIENCE_STORAGE_KEY);
+  return raw === "pax" ? "pax" : "drv";
+}
+
 async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
-  // Fetch profile (auto-created by handle_new_user trigger on signup)
   const { data: profile, error: profileErr } = await supabase
     .from("profiles")
     .select("email, full_name, is_enabled")
@@ -43,7 +55,6 @@ async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
     console.error("Error fetching profile:", profileErr);
   }
 
-  // Fetch role from user_roles table
   const { data: roleRow, error: roleErr } = await supabase
     .from("user_roles")
     .select("role")
@@ -73,6 +84,16 @@ async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [loading, setLoading] = useState(true);
+  const [audienceKind, setAudienceKindState] = useState<AudienceKind>(() => readStoredAudienceKind());
+
+  const setAudienceKind = useCallback((kind: AudienceKind) => {
+    setAudienceKindState(kind);
+    try {
+      window.localStorage.setItem(AUDIENCE_STORAGE_KEY, kind);
+    } catch {
+      /* localStorage unavailable (e.g. SSR or private mode) */
+    }
+  }, []);
 
   const loadUser = useCallback(async (sessionUser: User) => {
     const u = await fetchAuthUser(sessionUser);
@@ -123,7 +144,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = useCallback(async () => {
     const redirectTo = `${window.location.origin}/auth/callback`;
-    const { data, error } = await supabase.auth.signInWithOAuth({
+    const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
         redirectTo,
@@ -134,7 +155,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
     });
     if (error) return { error: error.message };
-    return { error: null, url: data.url };
+    return { error: null };
   }, []);
 
   const signOut = useCallback(async () => {
@@ -155,11 +176,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       role: user?.role ?? null,
       isEnabled: user?.isEnabled ?? false,
       loading,
+      audienceKind,
+      setAudienceKind,
       signInWithGoogle,
       signOut,
       refreshUser,
     }),
-    [user, loading, signInWithGoogle, signOut, refreshUser],
+    [user, loading, audienceKind, setAudienceKind, signInWithGoogle, signOut, refreshUser],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -169,4 +192,13 @@ export function useAuth() {
   const ctx = useContext(AuthContext);
   if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
+}
+
+/**
+ * Returns the audience kind derived from the URL path. Falls back to the
+ * AuthProvider state when the URL does not start with /drv or /pax.
+ */
+export function audienceKindFromPath(pathname: string): AudienceKind {
+  if (pathname.startsWith("/pax")) return "pax";
+  return "drv";
 }

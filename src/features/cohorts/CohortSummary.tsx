@@ -1,21 +1,30 @@
-import { formatBytes, formatNumber } from "./parser";
+import { formatBytes, formatNumber } from "@/lib/format";
+import { CSV_VALIDATORS } from "@/lib/constants";
+import type { AudienceKind } from "@/lib/auth";
 import type { CohortResult } from "./types";
 
 interface CohortSummaryProps {
   result: CohortResult;
   onClear?: () => void;
   variant?: "general" | "per-city";
+  kind?: AudienceKind;
 }
 
-export function CohortSummary({ result, onClear, variant = "general" }: CohortSummaryProps) {
+export function CohortSummary({
+  result,
+  onClear,
+  variant = "general",
+  kind = "drv",
+}: CohortSummaryProps) {
   const totalUnique = result.validIds.length;
   const totalProcessed = result.totalLines;
   const hasIssues = result.invalidCount > 0 || result.duplicateCount > 0;
 
+  const validator = CSV_VALIDATORS[kind];
   const headerLabel =
     variant === "general"
-      ? "Cohorte general"
-      : `Cohorte · ${result.cityName ?? result.cityCode ?? "ciudad"}`;
+      ? `Cohorte general (${validator.label})`
+      : `Cohorte · ${validator.label} · ${result.cityName ?? result.cityCode ?? "ciudad"}`;
 
   return (
     <div
@@ -57,7 +66,7 @@ export function CohortSummary({ result, onClear, variant = "general" }: CohortSu
           {result.invalidCount > 0 && (
             <>
               <span className="font-semibold text-red-700">{formatNumber(result.invalidCount)}</span>{" "}
-              líneas con formato inválido (no son DRV IDs de 15 dígitos).
+              líneas con formato inválido (no son {validator.label} válidos: {validator.hint}).
             </>
           )}
           {result.invalidCount > 0 && result.duplicateCount > 0 && " "}

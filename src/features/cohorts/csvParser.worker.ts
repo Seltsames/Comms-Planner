@@ -2,12 +2,22 @@
 
 import type { CohortParseMessage, CohortParseRequest } from "./types";
 
-const DRV_REGEX_STRICT = /^6509\d{11}$/;
+const DRV_REGEX_FALLBACK = /^6509\d{11}$/;
 const PROGRESS_INTERVAL_LINES = 1000;
 
 self.onmessage = async (event: MessageEvent<CohortParseRequest>) => {
-  const { file, mode, cityCode, cityName } = event.data;
+  const { file, mode, cityCode, cityName, regexSource } = event.data;
   const startTime = performance.now();
+
+  // Resolve the regex on the worker side. The main thread always sends
+  // one (see CSV_VALIDATORS in src/lib/constants.ts); the fallback only
+  // fires if the message is malformed.
+  let regex: RegExp;
+  try {
+    regex = regexSource ? new RegExp(regexSource) : DRV_REGEX_FALLBACK;
+  } catch {
+    regex = DRV_REGEX_FALLBACK;
+  }
 
   try {
     const text = await file.text();
@@ -41,7 +51,7 @@ self.onmessage = async (event: MessageEvent<CohortParseRequest>) => {
         continue;
       }
       const trimmed = line.trim();
-      const id = DRV_REGEX_STRICT.exec(trimmed)?.[0];
+      const id = regex.exec(trimmed)?.[0];
       if (id) {
         if (seen.has(id)) {
           duplicateCount++;

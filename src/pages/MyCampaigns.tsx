@@ -1,20 +1,19 @@
-import { useState } from "react";
-import { useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Card, PageHeader } from "@/components/Ui";
-import { useAuth } from "@/lib/auth";
+import { useAuth, type AudienceKind } from "@/lib/auth";
 import { fetchUserCampaigns, cancelCampaignRpc } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
-import { formatNumber } from "@/features/cohorts/parser";
+import { formatNumber } from "@/lib/format";
 
-export default function MyCampaigns() {
+export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
   const { user } = useAuth();
   const userId = user?.id ?? "";
   const [cancellingId, setCancellingId] = useState<string | null>(null);
 
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
-    () => (userId ? fetchUserCampaigns(userId) : Promise.resolve(null)),
+    () => (userId ? fetchUserCampaigns(userId, kind) : Promise.resolve(null)),
     60_000,
-    [userId],
+    [userId, kind],
   );
 
   const sorted = useMemo(() => {
@@ -28,7 +27,7 @@ export default function MyCampaigns() {
     if (!confirm("¿Cancelar esta campaña? Esta acción no se puede deshacer.")) return;
     setCancellingId(campaignId);
     try {
-      await cancelCampaignRpc(campaignId);
+      await cancelCampaignRpc(campaignId, kind);
       await refresh();
     } catch (e: unknown) {
       alert("Error al cancelar: " + (e as Error).message);

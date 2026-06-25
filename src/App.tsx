@@ -1,5 +1,5 @@
-import { Routes, Route, Navigate } from "react-router-dom";
-import { useAuth } from "@/lib/auth";
+import { Routes, Route, Navigate, useLocation } from "react-router-dom";
+import { useAuth, audienceKindFromPath, type AudienceKind } from "@/lib/auth";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import AuthCallback from "@/components/auth/AuthCallback";
@@ -9,6 +9,7 @@ import MyCampaigns from "@/pages/MyCampaigns";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminCampaigns from "@/pages/AdminCampaigns";
 import NotFound from "@/pages/NotFound";
+import { CampaignBuilderProvider } from "@/lib/campaignBuilder";
 
 function FullScreenLoader() {
   return (
@@ -53,6 +54,22 @@ function PendingOnly({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Reads the audience kind from the URL (e.g. /pax/builder) and wraps the
+ * children in a CampaignBuilderProvider so the form state survives
+ * navigation between Builder → Dashboard → My Campaigns AND between DRV
+ * ↔ PAX switching.
+ */
+function KindScoped({ kind, children }: { kind: AudienceKind; children: React.ReactNode }) {
+  return <CampaignBuilderProvider kind={kind}>{children}</CampaignBuilderProvider>;
+}
+
+function KindFromUrl({ children }: { children: (kind: AudienceKind) => React.ReactNode }) {
+  const location = useLocation();
+  const kind = audienceKindFromPath(location.pathname);
+  return <>{children(kind)}</>;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -73,26 +90,60 @@ export default function App() {
           </PendingOnly>
         }
       />
+
+      {/* DRV app routes */}
       <Route
-        path="/"
+        path="/drv"
         element={
           <Protected>
-            <Layout>
-              <Index />
-            </Layout>
+            <KindScoped kind="drv">
+              <Layout>
+                <Index />
+              </Layout>
+            </KindScoped>
           </Protected>
         }
       />
       <Route
-        path="/my-campaigns"
+        path="/drv/my-campaigns"
         element={
           <Protected>
-            <Layout>
-              <MyCampaigns />
-            </Layout>
+            <KindScoped kind="drv">
+              <Layout>
+                <MyCampaigns kind="drv" />
+              </Layout>
+            </KindScoped>
           </Protected>
         }
       />
+
+      {/* PAX app routes */}
+      <Route
+        path="/pax"
+        element={
+          <Protected>
+            <KindScoped kind="pax">
+              <Layout>
+                <Index />
+              </Layout>
+            </KindScoped>
+          </Protected>
+        }
+      />
+      <Route
+        path="/pax/my-campaigns"
+        element={
+          <Protected>
+            <KindScoped kind="pax">
+              <Layout>
+                <MyCampaigns kind="pax" />
+              </Layout>
+            </KindScoped>
+          </Protected>
+        }
+      />
+
+      {/* Shared admin routes — kind dispatched from the URL via ?kind=... */}
       <Route
         path="/admin/users"
         element={
@@ -107,12 +158,22 @@ export default function App() {
         path="/admin/campaigns"
         element={
           <AdminOnly>
-            <Layout>
-              <AdminCampaigns />
-            </Layout>
+            <KindFromUrl>
+              {(kind) => (
+                <Layout>
+                  <AdminCampaigns kind={kind} />
+                </Layout>
+              )}
+            </KindFromUrl>
           </AdminOnly>
         }
       />
+
+      {/* Backwards compatibility: redirect legacy routes to the DRV namespace. */}
+      <Route path="/" element={<Navigate to="/drv" replace />} />
+      <Route path="/my-campaigns" element={<Navigate to="/drv/my-campaigns" replace />} />
+      <Route path="/admin/campaigns/drv" element={<Navigate to="/admin/campaigns" replace state={{ kind: "drv" }} />} />
+
       <Route path="*" element={<NotFound />} />
     </Routes>
   );

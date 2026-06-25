@@ -1,8 +1,18 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 
 const DRV_REGEX_STRICT = /^6509\d{11}$/;
-const csvPath = resolve("..", "CAP_PROSP_MX_W21.csv");
+
+const argPath = process.argv[2];
+const defaultPath = resolve("..", "CAP_PROSP_MX_W21.csv");
+const csvPath = argPath ? resolve(argPath) : defaultPath;
+
+if (!existsSync(csvPath)) {
+  console.error(`CSV not found: ${csvPath}`);
+  console.error("Usage: node scripts/test-cohort.mjs <path/to/cohort.csv>");
+  process.exit(1);
+}
+
 const text = readFileSync(csvPath, "utf8");
 const lines = text.split(/\r?\n/);
 

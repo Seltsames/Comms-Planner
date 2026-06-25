@@ -1,4 +1,5 @@
-export const TEAMS_HIERARCHY = [
+// DRV -----------------------------------------------------------------------
+export const DRV_TEAMS_HIERARCHY = [
   {
     team: "Brand Connection",
     subTeams: ["Branding and Experiential", "Channel Experience", "Experiential and Channels"],
@@ -11,8 +12,31 @@ export const TEAMS_HIERARCHY = [
   { team: "Experience", subTeams: ["Safety and Service Governance"] },
 ] as const;
 
-export const TEAMS = TEAMS_HIERARCHY.map((t) => t.team);
-export type Team = (typeof TEAMS)[number];
+export const DRV_TEAMS = DRV_TEAMS_HIERARCHY.map((t) => t.team);
+
+// PAX -----------------------------------------------------------------------
+// PAX has six top-level teams and NO sub-teams — the hierarchy is flat.
+export const PAX_TEAMS = [
+  "Brand Field",
+  "Growth",
+  "Product",
+  "AR HUB + InEx",
+  "Premier",
+  "Índigo",
+] as const;
+
+export type PaxTeam = (typeof PAX_TEAMS)[number];
+
+// Unified type for code that handles both sides.
+export interface TeamNode {
+  team: string;
+  subTeams: readonly string[];
+}
+
+export const TEAMS_BY_KIND = {
+  drv: DRV_TEAMS_HIERARCHY.map((t) => ({ team: t.team, subTeams: t.subTeams })),
+  pax: PAX_TEAMS.map((t) => ({ team: t, subTeams: [] as const })),
+} as const satisfies Record<"drv" | "pax", readonly TeamNode[]>;
 
 export const COMM_TYPES = {
   POPE: "Pope",
@@ -21,6 +45,7 @@ export const COMM_TYPES = {
 
 export type CommType = (typeof COMM_TYPES)[keyof typeof COMM_TYPES];
 
+// Same channel set applies to both audiences for now (per product spec).
 export const ACTION_KEYS_BY_TYPE: Record<CommType, string[]> = {
   [COMM_TYPES.POPE]: ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"],
   [COMM_TYPES.AD_PLACEMENT]: ["Pop Up", "XPanel"],
@@ -45,6 +70,28 @@ export interface City {
   name: string;
   country: Country;
 }
+
+// CSV validators ---------------------------------------------------------
+// DRV IDs are 15 digits starting with 6509.
+// PAX IDs are 14-digit integers starting with 87. When PAX IDs are
+// exported to spreadsheets like Excel they render as scientific notation
+// (e.g. 8.79616E+13) but the underlying CSV has the full 14-digit integer.
+// Kept separate so each side can diverge further without touching every
+// consumer.
+export const CSV_VALIDATORS = {
+  drv: {
+    idField: "drv_id" as const,
+    regex: /^6509\d{11}$/,
+    label: "DRV ID",
+    hint: "15 dígitos, empieza con 6509",
+  },
+  pax: {
+    idField: "pax_id" as const,
+    regex: /^87\d{12}$/,
+    label: "PAX ID",
+    hint: "14 dígitos, empieza con 87",
+  },
+} as const;
 
 const RAW_CITIES: City[] = [
   // Argentina (AR)

@@ -1,6 +1,7 @@
 import { Calendar, Download, X, Check, AlertTriangle } from "lucide-react";
 import { useMemo } from "react";
 import type { ScheduledComm } from "./ScheduledCommsPreview";
+import { formatDateLong } from "@/lib/format";
 
 interface SaveSuccessModalProps {
   campaignId: string;
@@ -8,15 +9,6 @@ interface SaveSuccessModalProps {
   campaignName: string;
   scheduledComms: ScheduledComm[];
   onClose: () => void;
-}
-
-function formatDateLong(dateStr: string) {
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("es-MX", { day: "numeric", month: "long", year: "numeric" });
-}
-
-function formatTimeShort(t: string) {
-  return t;
 }
 
 export function SaveSuccessModal({
@@ -121,7 +113,7 @@ export function SaveSuccessModal({
                       <div key={c.id} className="px-4 py-2.5 flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="text-sm font-mono font-bold text-slate-700 w-20">
-                            {formatTimeShort(c.time)}
+                            {c.time}
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-slate-800">{c.actionKey}</p>
@@ -164,7 +156,7 @@ export function SaveSuccessModal({
               }}
               className="inline-flex items-center justify-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-bold text-white transition hover:bg-brand-600"
             >
-              <Download size={14} /> Descargar CSV (mock)
+              <Download size={14} /> Descargar CSV
             </button>
             <button
               onClick={onClose}

@@ -1,25 +1,6 @@
 import { supabase } from "./supabase";
 import type { Database } from "@/types/database";
-
-export type SlotAvailability = Database["public"]["Functions"]["get_slot_availability"]["Returns"][number];
-
-export async function getSlotAvailability(
-  country: string,
-  cityCodes: string[],
-  startDate: string,
-  endDate: string,
-  actionKeys: string[],
-): Promise<SlotAvailability[]> {
-  const { data, error } = await supabase.rpc("get_slot_availability", {
-    p_country: country,
-    p_city_codes: cityCodes,
-    p_start_date: startDate,
-    p_end_date: endDate,
-    p_action_keys: actionKeys,
-  });
-  if (error) throw error;
-  return data as SlotAvailability[];
-}
+import type { AudienceKind } from "./auth";
 
 export type SlotAvailabilityV2 = {
   action_key: string;
@@ -32,81 +13,149 @@ export type SlotAvailabilityV2 = {
   total_schedules: number | null;
 };
 
+// Helper: pick the right RPC name for DRV vs PAX. The PAX variants are
+// appended with _pax (save_campaign_pax, cancel_campaign_pax, etc.).
+function rpcName(base: string, kind: AudienceKind): string {
+  return kind === "pax" ? `${base}_pax` : base;
+}
+
+function audienceIdsParam(kind: AudienceKind) {
+  return kind === "pax" ? "p_pax_ids" : "p_drv_ids";
+}
+
+// ---------------------------------------------------------------------------
+// Slot availability
+// ---------------------------------------------------------------------------
 export async function getSlotAvailabilityV2(
   country: string,
   cityCodes: string[],
   startDate: string,
   endDate: string,
   actionKeys: string[],
-  drvIds: string[],
+  audienceIds: string[],
+  kind: AudienceKind,
 ): Promise<SlotAvailabilityV2[]> {
-  const { data, error } = await supabase.rpc("get_slot_availability_v2", {
+  const { data, error } = await supabase.rpc(rpcName("get_slot_availability_v2", kind), {
     p_country: country,
     p_city_codes: cityCodes,
     p_start_date: startDate,
     p_end_date: endDate,
     p_action_keys: actionKeys,
-    p_drv_ids: drvIds,
+    [audienceIdsParam(kind)]: audienceIds,
   });
   if (error) throw error;
   return (data ?? []) as SlotAvailabilityV2[];
 }
 
-export type CampaignRow = Database["public"]["Tables"]["campaigns"]["Row"];
+// ---------------------------------------------------------------------------
+// Campaign row types
+// ---------------------------------------------------------------------------
+export type CampaignRow =
+  | Database["drv"]["Tables"]["campaigns"]["Row"]
+  | Database["pax"]["Tables"]["campaigns"]["Row"];
 export type CampaignScheduleRow =
-  Database["public"]["Tables"]["campaign_schedules"]["Row"];
+  | Database["drv"]["Tables"]["campaign_schedules"]["Row"]
+  | Database["pax"]["Tables"]["campaign_schedules"]["Row"];
 
+function readRpcFor(
+  base: "list_user" | "list_all" | "get_one" | "list_schedules",
+  kind: AudienceKind,
+): string {
+  // DRV keeps the original names; PAX is suffixed _pax.
+  if (kind === "drv") {
+    switch (base) {
+      case "list_user":      return "list_user_campaigns_drv";
+      case "list_all":       return "list_all_campaigns_drv";
+      case "get_one":        return "get_campaign_drv";
+      case "list_schedules": return "list_campaign_schedules_drv";
+    }
+  }
+  switch (base) {
+    case "list_user":      return "list_user_campaigns_pax";
+    case "list_all":       return "list_all_campaigns_pax";
+    case "get_one":        return "get_campaign_pax";
+    case "list_schedules": return "list_campaign_schedules_pax";
+  }
+  throw new Error("unreachable");
+}
+
+// ---------------------------------------------------------------------------
+// Campaign list / lookup (all routed through RPCs to avoid relying on
+// PostgREST exposing the drv/pax schemas, which Supabase Cloud does not
+// honour via ALTER ROLE alone — see migration 00029.)
+// ---------------------------------------------------------------------------
 export async function fetchUserCampaigns(
-  userId: string,
+  _userId: string,
+  kind: AudienceKind,
 ): Promise<CampaignRow[] | null> {
-  const { data, error } = await supabase
-    .from("campaigns")
-    .select("*")
-    .eq("creator_id", userId)
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-
+  // The RPC filters by auth.uid() itself, so _userId is intentionally
+  // unused but kept in the signature for API stability.
+  void _userId;
+  const { data, error } = await supabase.rpc(readRpcFor("list_user", kind));
   if (error) throw error;
-  return data as CampaignRow[];
+  return (data ?? []) as CampaignRow[];
 }
 
-export async function fetchAllCampaigns(): Promise<CampaignRow[] | null> {
-  const { data, error } = await supabase
-    .from("campaigns")
-    .select("*")
-    .is("deleted_at", null)
-    .order("created_at", { ascending: false });
-
+export async function fetchAllCampaigns(kind: AudienceKind): Promise<CampaignRow[] | null> {
+  const { data, error } = await supabase.rpc(readRpcFor("list_all", kind));
   if (error) throw error;
-  return data as CampaignRow[];
+  return (data ?? []) as CampaignRow[];
 }
 
-export async function cancelCampaignRpc(campaignId: string): Promise<void> {
-  const { error } = await supabase.rpc("cancel_campaign", { p_campaign_id: campaignId });
+export async function fetchCampaignById(
+  id: string,
+  kind: AudienceKind,
+): Promise<CampaignRow | null> {
+  const { data, error } = await supabase.rpc(readRpcFor("get_one", kind), { p_id: id });
+  if (error) throw error;
+  return (data as CampaignRow | null) ?? null;
+}
+
+export async function fetchCampaignSchedules(
+  kind: AudienceKind,
+): Promise<CampaignScheduleRow[] | null> {
+  const { data, error } = await supabase.rpc(readRpcFor("list_schedules", kind));
+  if (error) throw error;
+  return (data ?? []) as CampaignScheduleRow[];
+}
+
+// ---------------------------------------------------------------------------
+// Campaign lifecycle RPCs
+// ---------------------------------------------------------------------------
+export async function cancelCampaignRpc(campaignId: string, kind: AudienceKind): Promise<void> {
+  const { error } = await supabase.rpc(rpcName("cancel_campaign", kind), {
+    p_campaign_id: campaignId,
+  });
   if (error) throw error;
 }
 
-export async function approveCampaignRpc(campaignId: string): Promise<void> {
-  const { error } = await supabase.rpc("approve_campaign", { p_campaign_id: campaignId });
+export async function approveCampaignRpc(campaignId: string, kind: AudienceKind): Promise<void> {
+  const { error } = await supabase.rpc(rpcName("approve_campaign", kind), {
+    p_campaign_id: campaignId,
+  });
   if (error) throw error;
 }
 
-export async function rejectCampaignRpc(campaignId: string): Promise<void> {
-  const { error } = await supabase.rpc("reject_campaign", { p_campaign_id: campaignId });
+export async function rejectCampaignRpc(campaignId: string, kind: AudienceKind): Promise<void> {
+  const { error } = await supabase.rpc(rpcName("reject_campaign", kind), {
+    p_campaign_id: campaignId,
+  });
   if (error) throw error;
 }
 
-export async function deleteCampaignHardRpc(campaignId: string): Promise<void> {
-  const { error } = await supabase.rpc("delete_campaign_hard", { p_campaign_id: campaignId });
+export async function deleteCampaignHardRpc(
+  campaignId: string,
+  kind: AudienceKind,
+): Promise<void> {
+  const { error } = await supabase.rpc(rpcName("delete_campaign_hard", kind), {
+    p_campaign_id: campaignId,
+  });
   if (error) throw error;
 }
 
-export async function fetchDashboardStats() {
-  const { data, error } = await supabase.rpc("get_dashboard_stats");
-  if (error && error.code !== "PGRST116") throw error;
-  return data ?? null;
-}
-
+// ---------------------------------------------------------------------------
+// Analytics aggregates
+// ---------------------------------------------------------------------------
 export type AnalyticsAggregates = {
   kpis: {
     total_comms: number;
@@ -139,30 +188,24 @@ export type AnalyticsAggregates = {
   per_campaign_drivers: Array<{ campaign_id: string; drivers: number }>;
 };
 
-export async function fetchAnalyticsAggregates(
-  country: string = "all",
-  channel: string = "all",
-): Promise<AnalyticsAggregates | null> {
-  const { data, error } = await supabase.rpc("get_analytics_aggregates", {
-    p_country: country,
-    p_channel: channel,
-  });
-  if (error) throw error;
-  return (data as AnalyticsAggregates) ?? null;
-}
-
+// ---------------------------------------------------------------------------
+// Cohort conflict check
+// ---------------------------------------------------------------------------
 export async function checkCohortConflictsRpc(
-  drvIds: string[],
+  audienceIds: string[],
   country: string,
   startDate: string,
   endDate: string,
+  kind: AudienceKind,
 ) {
-  const { data, error } = await supabase.rpc("check_cohort_conflicts", {
-    p_drv_ids: drvIds,
+  const baseName = "check_cohort_conflicts";
+  const args: Record<string, unknown> = {
     p_country: country,
     p_start_date: startDate,
     p_end_date: endDate,
-  });
+    [audienceIdsParam(kind)]: audienceIds,
+  };
+  const { data, error } = await supabase.rpc(rpcName(baseName, kind), args);
   if (error) throw error;
   return data as Array<{
     campaign_id: string;
@@ -170,31 +213,41 @@ export async function checkCohortConflictsRpc(
     schedule_date: string;
     time_slot: string;
     action_key: string;
-    conflicting_drv_count: number;
+    conflicting_drv_count?: number;
+    conflicting_pax_count?: number;
   }>;
 }
 
-export async function saveCampaignRpc(params: {
-  name: string;
-  team: string;
-  subTeam: string;
-  types: string[];
-  actionKeys: string[];
-  country: string;
-  cityCodes: string[];
-  csvFileName: string;
-  startDate: string;
-  endDate: string;
-  status?: string;
-  schedules: Array<{
-    action_key: string;
-    schedule_date: string;
-    time_slot: string;
-    image_url?: string;
-  }>;
-  audience: Array<{ drv_id: string; city_code: string | null }>;
-}) {
-  const { data, error } = await supabase.rpc("save_campaign_v2", {
+// ---------------------------------------------------------------------------
+// Save campaign
+// ---------------------------------------------------------------------------
+export async function saveCampaignRpc(
+  params: {
+    name: string;
+    team: string;
+    subTeam: string;
+    types: string[];
+    actionKeys: string[];
+    country: string;
+    cityCodes: string[];
+    csvFileName: string;
+    startDate: string;
+    endDate: string;
+    status?: string;
+    schedules: Array<{
+      action_key: string;
+      schedule_date: string;
+      time_slot: string;
+      image_url?: string;
+    }>;
+    audience: Array<{ id: string; city_code: string | null }>;
+  },
+  kind: AudienceKind,
+) {
+  const idKey = kind === "pax" ? "pax_id" : "drv_id";
+  const audience = params.audience.map((a) => ({ [idKey]: a.id, city_code: a.city_code }));
+
+  const { data, error } = await supabase.rpc(rpcName("save_campaign_v2", kind), {
     p_name: params.name,
     p_team: params.team,
     p_sub_team: params.subTeam,
@@ -207,19 +260,10 @@ export async function saveCampaignRpc(params: {
     p_end_date: params.endDate,
     p_status: params.status ?? "pending",
     p_schedules: params.schedules,
-    p_audience: params.audience,
+    p_audience: audience,
   });
   if (error) throw error;
   return data as string;
 }
 
-export async function fetchCampaignById(id: string): Promise<CampaignRow | null> {
-  const { data, error } = await supabase
-    .from("campaigns")
-    .select("*")
-    .eq("id", id)
-    .is("deleted_at", null)
-    .single();
-  if (error) throw error;
-  return data as CampaignRow;
-}
+export { };

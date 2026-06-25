@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { CITIES_DATA } from "@/lib/constants";
+import { CITIES_DATA, CSV_VALIDATORS } from "@/lib/constants";
+import type { AudienceKind } from "@/lib/auth";
 import { CohortSummary } from "./CohortSummary";
 import { formatBytes, formatNumber, parseCohortCsv } from "./parser";
 import type {
@@ -18,6 +19,7 @@ interface CohortUploaderProps {
   selectedCityCodes: string[];
   value: CohortState;
   onChange: (state: CohortState) => void;
+  kind: AudienceKind;
 }
 
 export function CohortUploader({
@@ -25,6 +27,7 @@ export function CohortUploader({
   selectedCityCodes,
   value,
   onChange,
+  kind,
 }: CohortUploaderProps) {
   const [mode, setMode] = useState<CohortMode>("general");
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -32,6 +35,8 @@ export function CohortUploader({
   const [error, setError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+
+  const validator = CSV_VALIDATORS[kind];
 
   const showPerCityToggle = selectedCityCodes.length > 1;
 
@@ -66,11 +71,12 @@ export function CohortUploader({
       mode: target ? "per-city" : "general",
       cityCode: target,
       cityName: target ? (CITIES_DATA.find((c) => c.id === target)?.name ?? target) : null,
+      regexSource: validator.regex.source,
       onProgress: (p) => setProgress(p),
     })
       .then((result) => {
         if (result.validIds.length === 0) {
-          setError("El archivo no contiene DRV IDs válidos (15 dígitos, inician con 6509).");
+          setError(`El archivo no contiene ${validator.label} válidos (${validator.hint}).`);
           setActiveKey(null);
           setProgress(null);
           return;
@@ -135,13 +141,15 @@ export function CohortUploader({
       {isGeneral ? (
         <div className="space-y-3">
           {value.general ? (
-            <CohortSummary result={value.general} onClear={clearGeneral} variant="general" />
+            <CohortSummary result={value.general} onClear={clearGeneral} variant="general" kind={kind} />
           ) : (
             <UploadDropZone
               label="Subir CSV general (un archivo para todas las ciudades)"
               isLoading={isLoading}
               onPickFile={() => fileInputRef.current?.click()}
               disabled={isLoading}
+              validatorLabel={validator.label}
+              validatorHint={validator.hint}
             />
           )}
           {isLoading && progress && activeKey === "__general__" && (
@@ -172,6 +180,7 @@ export function CohortUploader({
                     result={cohort}
                     onClear={() => clearCity(code)}
                     variant="per-city"
+                    kind={kind}
                   />
                 ) : (
                   <UploadDropZone
@@ -179,6 +188,8 @@ export function CohortUploader({
                     isLoading={isLoading && isActive}
                     onPickFile={() => cityInputRefs.current[code]?.click()}
                     disabled={isLoading}
+                    validatorLabel={validator.label}
+                    validatorHint={validator.hint}
                   />
                 )}
                 {isLoading && isActive && progress && <ProgressBar progress={progress} />}
@@ -251,11 +262,15 @@ function UploadDropZone({
   isLoading,
   onPickFile,
   disabled,
+  validatorLabel,
+  validatorHint,
 }: {
   label: string;
   isLoading: boolean;
   onPickFile: () => void;
   disabled: boolean;
+  validatorLabel: string;
+  validatorHint: string;
 }) {
   return (
     <div
@@ -263,12 +278,12 @@ function UploadDropZone({
         isLoading ? "border-brand-300 bg-brand-50" : "border-slate-300 bg-slate-50"
       }`}
     >
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium text-slate-700">{label}</p>
-        <p className="text-xs text-slate-500">
-          {isLoading ? "Procesando archivo…" : "CSV con un DRV ID (15 dígitos, empieza con 6509) por línea."}
-        </p>
-      </div>
+<div className="min-w-0 flex-1">
+          <p className="truncate text-sm font-medium text-slate-700">{label}</p>
+          <p className="text-xs text-slate-500">
+            {isLoading ? "Procesando archivo…" : `CSV con un ${validatorLabel} (${validatorHint}) por línea.`}
+          </p>
+        </div>
       <button
         type="button"
         onClick={onPickFile}

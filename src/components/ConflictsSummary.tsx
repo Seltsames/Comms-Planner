@@ -1,4 +1,5 @@
 import { AlertTriangle, Lock } from "lucide-react";
+import { formatDateShort } from "@/lib/format";
 
 interface Conflict {
   date: string;
@@ -14,11 +15,6 @@ export interface ChannelConflicts {
 
 interface ConflictsSummaryProps {
   channelConflicts: Record<string, ChannelConflicts>;
-}
-
-function formatDateShort(dateStr: string) {
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("es-MX", { day: "numeric", month: "short" });
 }
 
 export function ConflictsSummary({ channelConflicts }: ConflictsSummaryProps) {

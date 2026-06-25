@@ -1,32 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/lib/auth";
+import type { AudienceKind } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
-import type { CampaignRow, CampaignScheduleRow, AnalyticsAggregates } from "@/lib/queries";
+import {
+  fetchAllCampaigns,
+  fetchCampaignSchedules,
+  type AnalyticsAggregates,
+} from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
   Calendar, AlertTriangle, CheckCircle, FileText, Target, Users,
   Download, X, ChevronLeft, ChevronRight, Megaphone, List,
 } from "lucide-react";
 import AnalyticsView from "./AnalyticsView";
+import { formatDateShort, formatDateWithWeekday } from "@/lib/format";
+import { getChannelColor } from "@/lib/channelStyles";
 
 const TIME_SLOTS_30M: string[] = [];
 for (let h = 7; h < 22; h++) {
   TIME_SLOTS_30M.push(`${String(h).padStart(2, "0")}:00`);
   TIME_SLOTS_30M.push(`${String(h).padStart(2, "0")}:30`);
 }
-
-const CHANNEL_COLORS: Record<string, { bg: string; border: string; text: string; dot: string }> = {
-  "Pop Up": { bg: "bg-blue-500/15", border: "border-blue-500/30", text: "text-blue-600", dot: "bg-blue-500" },
-  XPanel: { bg: "bg-purple-500/15", border: "border-purple-500/30", text: "text-purple-600", dot: "bg-purple-500" },
-  Whatsapp: { bg: "bg-emerald-500/15", border: "border-emerald-500/30", text: "text-emerald-600", dot: "bg-emerald-500" },
-  "Push in/out": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400" },
-  "Push in": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400" },
-  "Push out": { bg: "bg-amber-400/15", border: "border-amber-400/30", text: "text-amber-600", dot: "bg-amber-400" },
-  Email: { bg: "bg-pink-500/15", border: "border-pink-500/30", text: "text-pink-600", dot: "bg-pink-500" },
-  SMS: { bg: "bg-slate-100", border: "border-slate-200", text: "text-slate-600", dot: "bg-slate-400" },
-};
-const getChannelColor = (actionKey: string) =>
-  CHANNEL_COLORS[actionKey] ?? { bg: "bg-brand-500/10", border: "border-brand-500/20", text: "text-brand-600", dot: "bg-brand-500" };
 
 const POPE_CHANNELS = ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"];
 const AD_CHANNELS = ["Pop Up", "XPanel"];
@@ -36,11 +30,6 @@ function shortName(fullName: string) {
   const parts = fullName.split("_");
   if (parts.length <= 4) return parts[parts.length - 1];
   return parts.slice(4).join("_");
-}
-
-function formatDateShort(dateStr: string) {
-  const d = new Date(dateStr + "T12:00:00");
-  return d.toLocaleDateString("es-MX", { weekday: "short", day: "2-digit", month: "short" });
 }
 
 interface ScheduleItem {
@@ -69,7 +58,7 @@ interface ConflictDetail {
   reason: string;
 }
 
-export default function DashboardView() {
+export default function DashboardView({ kind }: { kind: AudienceKind }) {
   const { user, role } = useAuth();
   const isAdmin = role === "admin";
 
@@ -82,39 +71,32 @@ export default function DashboardView() {
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [filterHourFrom, setFilterHourFrom] = useState<string>("all");
   const [filterHourTo, setFilterHourTo] = useState<string>("all");
-  const [filterCreator, setFilterCreator] = useState<string>("all");
   const [filterTeam, setFilterTeam] = useState<string>("all");
   const [filterCountry, setFilterCountry] = useState<string>("all");
 
   const [activeTab, setActiveTab] = useState<"planning" | "analytics">("planning");
 
   const { data: rawCampaigns } = useAutoRefresh(
-    async () => {
-      const { data } = await supabase.from("campaigns").select("*");
-      return (data as CampaignRow[]) ?? null;
-    },
+    () => fetchAllCampaigns(kind),
     60_000,
-    [],
+    [kind],
   );
 
   const { data: rawSchedules } = useAutoRefresh(
-    async () => {
-      const { data } = await supabase.from("campaign_schedules").select("*");
-      return (data as CampaignScheduleRow[]) ?? null;
-    },
+    () => fetchCampaignSchedules(kind),
     60_000,
-    [],
+    [kind],
   );
 
-  // Server-side driver count (admin only — falls back to 0 silently for non-admins)
+  // Server-side driver/passenger count (admin only — falls back to 0 silently for non-admins)
   const { data: aggregates } = useAutoRefresh(
     async () => {
       if (role !== "admin") return null;
       try {
-        const { data, error } = await supabase.rpc("get_analytics_aggregates", {
-          p_country: "all",
-          p_channel: "all",
-        });
+        const { data, error } = await supabase.rpc(
+          kind === "pax" ? "get_analytics_aggregates_pax" : "get_analytics_aggregates",
+          { p_country: "all", p_channel: "all" },
+        );
         if (error) return null;
         return (data as AnalyticsAggregates) ?? null;
       } catch {
@@ -122,7 +104,7 @@ export default function DashboardView() {
       }
     },
     60_000,
-    [role],
+    [role, kind],
   );
 
   const totalDriversCount = aggregates?.kpis.total_drivers ?? 0;
@@ -196,11 +178,10 @@ export default function DashboardView() {
   const filteredItems = useMemo(() => {
     return scheduleItems.filter(c =>
       (filterChannel === "all" || c.actionKey === filterChannel) &&
-      (filterCreator === "all" || c.creatorId === filterCreator) &&
       (filterTeam === "all" || c.team === filterTeam) &&
       (filterCountry === "all" || c.country === filterCountry),
     );
-  }, [scheduleItems, filterChannel, filterCreator, filterTeam, filterCountry]);
+  }, [scheduleItems, filterChannel, filterTeam, filterCountry]);
 
   const filteredBySubTab = useMemo(() => {
     return filteredItems.filter(c =>
@@ -209,11 +190,10 @@ export default function DashboardView() {
   }, [filteredItems, calendarSubTab]);
 
   const dayStats = useMemo(() => {
-    const stats: Record<string, { items: ScheduleItem[]; totalVolume: number }> = {};
+    const stats: Record<string, { items: ScheduleItem[] }> = {};
     filteredBySubTab.forEach(item => {
-      if (!stats[item.scheduleDate]) stats[item.scheduleDate] = { items: [], totalVolume: 0 };
+      if (!stats[item.scheduleDate]) stats[item.scheduleDate] = { items: [] };
       stats[item.scheduleDate].items.push(item);
-      stats[item.scheduleDate].totalVolume += item.drvIds.size;
     });
     return stats;
   }, [filteredBySubTab]);
@@ -277,13 +257,12 @@ export default function DashboardView() {
     };
   }, [scheduleItems]);
 
-  const hasActiveFilters = filterChannel !== "all" || filterHourFrom !== "all" || filterHourTo !== "all" || filterCreator !== "all" || filterTeam !== "all" || filterCountry !== "all";
+  const hasActiveFilters = filterChannel !== "all" || filterHourFrom !== "all" || filterHourTo !== "all" || filterTeam !== "all" || filterCountry !== "all";
 
   function clearFilters() {
     setFilterChannel("all");
     setFilterHourFrom("all");
     setFilterHourTo("all");
-    setFilterCreator("all");
     setFilterTeam("all");
     setFilterCountry("all");
   }
@@ -590,7 +569,7 @@ export default function DashboardView() {
                       return (
                         <th key={date} onClick={() => setSelectedDate(date)}
                           className={`p-2 text-center cursor-pointer transition border-l border-slate-100 font-normal ${isSelected ? "bg-brand-50" : "hover:bg-slate-50"}`}>
-                          <p className="text-xs font-bold text-slate-700">{formatDateShort(date)}</p>
+                          <p className="text-xs font-bold text-slate-700">{formatDateWithWeekday(date)}</p>
                         </th>
                       );
                     })}
@@ -625,7 +604,7 @@ export default function DashboardView() {
       )}
 
       {activeTab === "analytics" && isAdmin && (
-        <AnalyticsView />
+        <AnalyticsView kind={kind} />
       )}
 
       {inspectorConflict && (
