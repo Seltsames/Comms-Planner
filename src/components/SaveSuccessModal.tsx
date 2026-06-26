@@ -150,7 +150,7 @@ export function SaveSuccessModal({
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement("a");
                 a.href = url;
-                a.download = `${campaignName.replace(/\s+/g, "_")}_schedule.csv`;
+                a.download = `${campaignName.replace(/[^A-Za-z0-9_-]/g, "_")}_schedule.csv`;
                 a.click();
                 URL.revokeObjectURL(url);
               }}

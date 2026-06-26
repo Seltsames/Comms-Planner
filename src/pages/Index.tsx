@@ -87,7 +87,12 @@ export default function Index() {
     if (team) parts.push(team);
     if (subTeam) parts.push(subTeam);
     if (name) parts.push(name);
-    return parts.join("_");
+    // Auto-generated names: uppercase, spaces → underscores, collapsed.
+    return parts
+      .join("_")
+      .toUpperCase()
+      .replace(/\s+/g, "_")
+      .replace(/_+/g, "_");
   }, [kind, country, team, subTeam, name]);
 
   const countryCities = useMemo(

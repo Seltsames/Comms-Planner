@@ -13,9 +13,12 @@ export type SlotAvailabilityV2 = {
   total_schedules: number | null;
 };
 
-// Helper: pick the right RPC name for DRV vs PAX. The PAX variants are
-// appended with _pax (save_campaign_pax, cancel_campaign_pax, etc.).
+// Helper: pick the right RPC name for DRV vs PAX.
+// Most PAX variants follow the {base}_pax pattern (cancel_campaign_pax,
+// approve_campaign_pax, etc.). The save RPC is the exception: it is named
+// save_campaign_pax in the database (not save_campaign_v2_pax).
 function rpcName(base: string, kind: AudienceKind): string {
+  if (kind === "pax" && base === "save_campaign_v2") return "save_campaign_pax";
   return kind === "pax" ? `${base}_pax` : base;
 }
 
