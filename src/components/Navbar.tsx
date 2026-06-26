@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, audienceKindFromPath, type AudienceKind } from "@/lib/auth";
 
@@ -6,17 +7,27 @@ export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
 
+  // The URL is the source of truth for which audience side is on screen.
+  // The context's `audienceKind` is a persistent hint (localStorage) used
+  // by non-URL consumers (e.g. CSV download metadata); sync it on every
+  // URL change so the two never disagree.
+  const urlKind = audienceKindFromPath(location.pathname);
+  useEffect(() => {
+    if (audienceKind !== urlKind) {
+      setAudienceKind(urlKind);
+    }
+  }, [urlKind, audienceKind, setAudienceKind]);
+
   function handleSignOut() {
     signOut();
     navigate("/login", { replace: true });
   }
 
   function handleKindSwitch(target: AudienceKind) {
-    if (target === audienceKind) return;
+    // Compare against urlKind, not audienceKind: if the URL already shows
+    // the target side, there's nothing to do (avoids redundant navigate).
+    if (target === urlKind) return;
     setAudienceKind(target);
-    // Preserve the current section when toggling between DRV and PAX.
-    // /drv/my-campaigns → /pax/my-campaigns, /admin/campaigns?kind=drv → ?kind=pax,
-    // /drv → /pax (builder), etc.
     const parts = location.pathname.split("/").filter(Boolean);
     if (parts[0] === "admin") {
       const search = new URLSearchParams(location.search);
@@ -27,8 +38,6 @@ export default function Navbar() {
       navigate(`/${target}/${section}`);
     }
   }
-
-  const urlKind = audienceKindFromPath(location.pathname);
 
   return (
     <nav className="sticky top-0 z-30 border-b border-slate-200 bg-white">
@@ -42,15 +51,18 @@ export default function Navbar() {
           </span>
         </Link>
 
-        {/* Audience-kind switcher */}
+        {/* Audience-kind switcher — visual state derived from the URL so it
+            always reflects what the user is currently looking at. */}
         <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
           <button
             type="button"
             onClick={() => handleKindSwitch("drv")}
             className={`rounded-lg px-3 py-1.5 transition ${
-              audienceKind === "drv" ? "bg-brand-500 text-white" : "text-slate-600 hover:bg-slate-100"
+              urlKind === "drv"
+                ? "bg-brand-500 text-white"
+                : "text-slate-600 hover:bg-slate-100"
             }`}
-            aria-pressed={audienceKind === "drv"}
+            aria-pressed={urlKind === "drv"}
           >
             Conductores
           </button>
@@ -58,17 +70,19 @@ export default function Navbar() {
             type="button"
             onClick={() => handleKindSwitch("pax")}
             className={`rounded-lg px-3 py-1.5 transition ${
-              audienceKind === "pax" ? "bg-brand-500 text-white" : "text-slate-600 hover:bg-slate-100"
+              urlKind === "pax"
+                ? "bg-brand-500 text-white"
+                : "text-slate-600 hover:bg-slate-100"
             }`}
-            aria-pressed={audienceKind === "pax"}
+            aria-pressed={urlKind === "pax"}
           >
             Pasajeros
           </button>
         </div>
 
         <div className="flex items-center gap-1 text-sm">
-          {/* Section nav links — scoped to the active kind */}
-          {audienceKind === "drv" && (
+          {/* Section nav links — scoped to whichever side the URL is on. */}
+          {urlKind === "drv" && (
             <>
               <NavLink
                 to="/drv"
@@ -93,7 +107,7 @@ export default function Navbar() {
               </NavLink>
             </>
           )}
-          {audienceKind === "pax" && (
+          {urlKind === "pax" && (
             <>
               <NavLink
                 to="/pax"
@@ -122,7 +136,7 @@ export default function Navbar() {
           {role === "admin" && (
             <>
               <NavLink
-                to="/admin/campaigns?kind=drv"
+                to={`/admin/campaigns?kind=${urlKind}`}
                 className={({ isActive }) =>
                   `rounded-lg px-3 py-2 font-medium transition ${
                     isActive ? "bg-brand-50 text-brand-600" : "text-slate-600 hover:bg-slate-100"
