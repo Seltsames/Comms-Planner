@@ -105,6 +105,24 @@ export async function fetchAllCampaigns(kind: AudienceKind): Promise<CampaignRow
   return (data ?? []) as CampaignRow[];
 }
 
+/**
+ * Unified admin view: returns campaigns from BOTH drv and pax, with
+ * a `kind` tag on every row so the UI can label and dispatch actions
+ * (approve / reject / delete) to the right schema.
+ */
+export type AdminCampaignRow = CampaignRow & { kind: AudienceKind };
+
+export async function fetchAllCampaignsBoth(): Promise<AdminCampaignRow[]> {
+  const [drv, pax] = await Promise.all([
+    fetchAllCampaigns("drv").catch(() => []),
+    fetchAllCampaigns("pax").catch(() => []),
+  ]);
+  return [
+    ...(drv ?? []).map((c) => ({ ...c, kind: "drv" as const })),
+    ...(pax ?? []).map((c) => ({ ...c, kind: "pax" as const })),
+  ];
+}
+
 export async function fetchCampaignById(
   id: string,
   kind: AudienceKind,

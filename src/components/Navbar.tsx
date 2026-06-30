@@ -136,7 +136,7 @@ export default function Navbar() {
           {role === "admin" && (
             <>
               <NavLink
-                to={`/admin/campaigns?kind=${urlKind}`}
+                to="/admin/campaigns"
                 className={({ isActive }) =>
                   `rounded-lg px-3 py-2 font-medium transition ${
                     isActive ? "bg-brand-50 text-brand-600" : "text-slate-600 hover:bg-slate-100"

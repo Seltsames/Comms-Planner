@@ -1,5 +1,5 @@
-import { Routes, Route, Navigate, useLocation } from "react-router-dom";
-import { useAuth, audienceKindFromPath, type AudienceKind } from "@/lib/auth";
+import { Routes, Route, Navigate } from "react-router-dom";
+import { useAuth, type AudienceKind } from "@/lib/auth";
 import Layout from "@/components/Layout";
 import Login from "@/pages/Login";
 import AuthCallback from "@/components/auth/AuthCallback";
@@ -62,12 +62,6 @@ function PendingOnly({ children }: { children: React.ReactNode }) {
  */
 function KindScoped({ kind, children }: { kind: AudienceKind; children: React.ReactNode }) {
   return <CampaignBuilderProvider kind={kind}>{children}</CampaignBuilderProvider>;
-}
-
-function KindFromUrl({ children }: { children: (kind: AudienceKind) => React.ReactNode }) {
-  const location = useLocation();
-  const kind = audienceKindFromPath(location.pathname);
-  return <>{children(kind)}</>;
 }
 
 export default function App() {
@@ -158,13 +152,9 @@ export default function App() {
         path="/admin/campaigns"
         element={
           <AdminOnly>
-            <KindFromUrl>
-              {(kind) => (
-                <Layout>
-                  <AdminCampaigns kind={kind} />
-                </Layout>
-              )}
-            </KindFromUrl>
+            <Layout>
+              <AdminCampaigns />
+            </Layout>
           </AdminOnly>
         }
       />

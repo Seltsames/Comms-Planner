@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
-  fetchAllCampaigns,
+  fetchAllCampaignsBoth,
   approveCampaignRpc,
   rejectCampaignRpc,
   deleteCampaignHardRpc,
@@ -16,14 +16,18 @@ interface ProfileLookup {
   full_name: string | null;
 }
 
-export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
+type KindFilter = "all" | AudienceKind;
+
+export default function AdminCampaigns() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
 
+  // Single call returns campaigns from BOTH schemas, tagged with `kind`.
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
-    () => fetchAllCampaigns(kind),
+    () => fetchAllCampaignsBoth(),
     60_000,
-    [kind],
+    [],
   );
 
   // Profiles are small and shared across both schemas, so we fetch them
@@ -48,7 +52,24 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
     return map;
   }, [profiles]);
 
-  async function handleApprove(id: string) {
+  const visibleCampaigns = useMemo(() => {
+    if (!campaigns) return [];
+    const filtered =
+      kindFilter === "all"
+        ? campaigns
+        : campaigns.filter((c) => c.kind === kindFilter);
+    return [...filtered].sort(
+      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
+    );
+  }, [campaigns, kindFilter]);
+
+  const counts = useMemo(() => {
+    const c = { drv: 0, pax: 0 };
+    for (const row of campaigns ?? []) c[row.kind]++;
+    return c;
+  }, [campaigns]);
+
+  async function handleApprove(id: string, kind: AudienceKind) {
     if (!confirm("Aprobar esta campaña?")) return;
     setActionId(id);
     try {
@@ -61,7 +82,7 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
     }
   }
 
-  async function handleReject(id: string) {
+  async function handleReject(id: string, kind: AudienceKind) {
     if (!confirm("Rechazar esta campaña?")) return;
     setActionId(id);
     try {
@@ -74,7 +95,7 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
     }
   }
 
-  async function handleDelete(id: string) {
+  async function handleDelete(id: string, kind: AudienceKind) {
     if (!confirm("Eliminar permanentemente esta campaña? Esta acción no se puede deshacer.")) return;
     setDeletingId(id);
     try {
@@ -90,8 +111,8 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
   return (
     <div className="mx-auto max-w-7xl px-4 py-8">
       <PageHeader
-        title={`Gestión de campañas · ${kind === "pax" ? "Pasajeros" : "Conductores"}`}
-        subtitle="Ver, aprobar, rechazar o eliminar campañas de todos los usuarios"
+        title="Gestión de campañas"
+        subtitle="Ver, aprobar, rechazar o eliminar campañas de conductores y pasajeros"
         action={
           <span className="text-xs text-slate-500">
             {loading && <span className="animate-pulse">Actualizando…</span>}
@@ -102,13 +123,32 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
         }
       />
 
+      {/* Filter chips */}
+      <div className="mb-4 flex flex-wrap items-center gap-2">
+        <FilterChip
+          active={kindFilter === "all"}
+          onClick={() => setKindFilter("all")}
+          label={`Todas · ${formatNumber((campaigns ?? []).length)}`}
+        />
+        <FilterChip
+          active={kindFilter === "drv"}
+          onClick={() => setKindFilter("drv")}
+          label={`Conductores · ${formatNumber(counts.drv)}`}
+        />
+        <FilterChip
+          active={kindFilter === "pax"}
+          onClick={() => setKindFilter("pax")}
+          label={`Pasajeros · ${formatNumber(counts.pax)}`}
+        />
+      </div>
+
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           Error cargando campañas: {error}
         </div>
       )}
 
-      {campaigns && campaigns.length === 0 && (
+      {visibleCampaigns.length === 0 && !loading && (
         <Card>
           <div className="py-8 text-center">
             <p className="text-sm font-semibold text-slate-600">No hay campañas</p>
@@ -132,10 +172,10 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {campaigns?.map((c) => {
+            {visibleCampaigns.map((c) => {
               const profile = profileById.get(c.creator_id);
               return (
-                <tr key={c.id} className="hover:bg-slate-50">
+                <tr key={`${c.kind}-${c.id}`} className="hover:bg-slate-50">
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-800">{c.name}</div>
                     <div className="text-xs text-slate-400">{c.team}</div>
@@ -158,7 +198,7 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
                     )}
                   </td>
                   <td className="px-4 py-3">
-                    <KindChip kind={kind} />
+                    <KindChip kind={c.kind} />
                   </td>
                   <td className="px-4 py-3">
                     <StatusBadge status={c.status} />
@@ -176,14 +216,14 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
                       {c.status === "pending" && (
                         <>
                           <button
-                            onClick={() => handleApprove(c.id)}
+                            onClick={() => handleApprove(c.id, c.kind)}
                             disabled={actionId === c.id}
                             className="rounded bg-green-100 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-200 disabled:opacity-50"
                           >
                             Aprobar
                           </button>
                           <button
-                            onClick={() => handleReject(c.id)}
+                            onClick={() => handleReject(c.id, c.kind)}
                             disabled={actionId === c.id}
                             className="rounded bg-red-100 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-200 disabled:opacity-50"
                           >
@@ -192,7 +232,7 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
                         </>
                       )}
                       <button
-                        onClick={() => handleDelete(c.id)}
+                        onClick={() => handleDelete(c.id, c.kind)}
                         disabled={deletingId === c.id}
                         className="rounded border border-red-200 bg-white px-2 py-1 text-xs text-red-600 hover:bg-red-50 disabled:opacity-50"
                       >
@@ -207,6 +247,31 @@ export default function AdminCampaigns({ kind }: { kind: AudienceKind }) {
         </table>
       </div>
     </div>
+  );
+}
+
+function FilterChip({
+  active,
+  onClick,
+  label,
+}: {
+  active: boolean;
+  onClick: () => void;
+  label: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`rounded-full px-3 py-1 text-xs font-semibold transition ${
+        active
+          ? "bg-brand-500 text-white shadow-sm"
+          : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+      }`}
+      aria-pressed={active}
+    >
+      {label}
+    </button>
   );
 }
 
