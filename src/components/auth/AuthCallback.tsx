@@ -1,17 +1,26 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/lib/supabase";
-import { useAuth } from "@/lib/auth";
 
 export default function AuthCallback() {
   const navigate = useNavigate();
-  const { loading } = useAuth();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
 
     async function handle() {
+      // Supabase JS client has detectSessionInUrl: true by default, which
+      // means it auto-exchanges the OAuth code and REMOVES it from the
+      // URL before this component gets a chance to read it. So the legacy
+      // "no code → error" path was firing on every successful login.
+      const { data } = await supabase.auth.getSession();
+      if (!active) return;
+      if (data.session) {
+        navigate("/", { replace: true });
+        return;
+      }
+
       const params = new URLSearchParams(window.location.search);
       const code = params.get("code");
       const errorDescription = params.get("error_description");
@@ -22,34 +31,28 @@ export default function AuthCallback() {
       }
 
       if (!code) {
-        setError("No se recibió código de autenticación");
+        // Still no code after the session check: surface the error so the
+        // user isn't stuck on the callback URL silently.
+        setError("No se recibió código de autenticación. Vuelve a intentar iniciar sesión.");
         return;
       }
 
+      // Final fallback: explicit exchange.
       const { error: exchangeErr } = await supabase.auth.exchangeCodeForSession(code);
+      if (!active) return;
       if (exchangeErr) {
         setError(exchangeErr.message);
         return;
       }
-
-      // Wait for AuthProvider to pick up the session, then redirect.
-      // AuthProvider's onAuthStateChange will fire and set the user.
-      // We just wait for loading to become false, then route to home.
-      const start = Date.now();
-      const poll = setInterval(() => {
-        if (!active) return clearInterval(poll);
-        if (!loading || Date.now() - start > 5000) {
-          clearInterval(poll);
-          navigate("/", { replace: true });
-        }
-      }, 100);
+      navigate("/", { replace: true });
     }
 
     handle();
+
     return () => {
       active = false;
     };
-  }, [navigate, loading]);
+  }, [navigate]);
 
   if (error) {
     return (

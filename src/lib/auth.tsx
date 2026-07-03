@@ -104,6 +104,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     let active = true;
 
+    // Safety net: never let `loading` stay true forever. If the bootstrap
+    // somehow hangs (slow network, stuck RPC, etc.) this flips the flag
+    // so the app can render the unauthenticated state instead of a
+    // perpetual spinner.
+    const loadingSafety = setTimeout(() => {
+      if (active && (loading as unknown as boolean)) {
+        console.warn("Auth bootstrap exceeded 5s — forcing loading=false");
+        setUser((prev) => prev);
+        setLoading(false);
+      }
+    }, 5000);
+
     async function bootstrap() {
       const { data, error } = await supabase.auth.getSession();
       if (!active) return;
@@ -111,15 +123,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         console.error("getSession error:", error);
         setUser(null);
         setLoading(false);
+        clearTimeout(loadingSafety);
         return;
       }
       const session = data.session;
-      if (session?.user) {
-        await loadUser(session.user);
-      } else {
+      try {
+        if (session?.user) {
+          await loadUser(session.user);
+        } else {
+          setUser(null);
+        }
+      } catch (e) {
+        console.error("loadUser error:", e);
         setUser(null);
+      } finally {
+        clearTimeout(loadingSafety);
+        if (active) setLoading(false);
       }
-      if (active) setLoading(false);
     }
 
     bootstrap();
@@ -127,17 +147,25 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const { data: sub } = supabase.auth.onAuthStateChange(
       async (_event, session: Session | null) => {
         if (!active) return;
-        if (session?.user) {
-          await loadUser(session.user);
-        } else {
+        try {
+          if (session?.user) {
+            await loadUser(session.user);
+          } else {
+            setUser(null);
+          }
+        } catch (e) {
+          console.error("onAuthStateChange loadUser error:", e);
           setUser(null);
+        } finally {
+          clearTimeout(loadingSafety);
+          if (active) setLoading(false);
         }
-        if (active) setLoading(false);
       },
     );
 
     return () => {
       active = false;
+      clearTimeout(loadingSafety);
       sub.subscription.unsubscribe();
     };
   }, [loadUser]);
