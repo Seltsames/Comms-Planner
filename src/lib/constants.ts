@@ -6,7 +6,7 @@ export const DRV_TEAMS_HIERARCHY = [
   },
   {
     team: "Growth",
-    subTeams: ["Growth Volume and Quality", "Growth Community and Offline", "Premier and fleet"],
+    subTeams: ["Volume and Quality", "Franchises", "Communities", "Offline", "Premier", "Fleet"],
   },
   { team: "Engagement", subTeams: ["Loyalty", "Earnings OPS"] },
   { team: "Experience", subTeams: ["Safety and Service Governance"] },
@@ -45,10 +45,26 @@ export const COMM_TYPES = {
 
 export type CommType = (typeof COMM_TYPES)[keyof typeof COMM_TYPES];
 
-// Same channel set applies to both audiences for now (per product spec).
-export const ACTION_KEYS_BY_TYPE: Record<CommType, string[]> = {
-  [COMM_TYPES.POPE]: ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"],
-  [COMM_TYPES.AD_PLACEMENT]: ["Pop Up", "XPanel"],
+// POPE channels are shared by both audiences; Ad Placement diverges per side.
+const POPE_CHANNELS = ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"];
+
+export const ACTION_KEYS_BY_KIND: Record<"drv" | "pax", Record<CommType, string[]>> = {
+  drv: {
+    [COMM_TYPES.POPE]: POPE_CHANNELS,
+    [COMM_TYPES.AD_PLACEMENT]: ["Pop Up", "XPanel"],
+  },
+  pax: {
+    [COMM_TYPES.POPE]: POPE_CHANNELS,
+    [COMM_TYPES.AD_PLACEMENT]: [
+      "Promo zone",
+      "Welfare big",
+      "Welfare small",
+      "Broadcast MKT area",
+      "OpenScreen",
+      "Promo banner",
+      "Pop Up",
+    ],
+  },
 };
 
 export const COUNTRIES = ["MX", "CO", "PE", "CR", "CL", "AR", "EC", "DO"] as const;

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
-  ACTION_KEYS_BY_TYPE,
+  ACTION_KEYS_BY_KIND,
   COMM_TYPES,
   CITIES_DATA,
   COUNTRIES,
@@ -72,8 +72,8 @@ export default function Index() {
   );
 
   const availableActionKeys = useMemo(
-    () => Array.from(new Set(types.flatMap((t) => ACTION_KEYS_BY_TYPE[t] ?? []))),
-    [types],
+    () => Array.from(new Set(types.flatMap((t) => ACTION_KEYS_BY_KIND[kind][t] ?? []))),
+    [types, kind],
   );
 
   const effectiveDrvIds = useMemo(
@@ -332,22 +332,15 @@ export default function Index() {
               subtitle={`Define el público objetivo y carga los cohortes (${kind === "pax" ? "pasajeros" : "conductores"})`}
             >
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <Field label="Usuario" full>
+                {/* PAX: Usuario + Equipo share one row (flat team list).
+                    DRV: Usuario full-width, then Equipo + Sub-equipo row. */}
+                <Field label="Usuario" full={kind !== "pax"}>
                   <div className={inputClass + " cursor-default"}>
                     {extractUsername(user?.email ?? "") || "Sin usuario"}
                   </div>
                 </Field>
 
-                <Field label="Nombre de campaña" full>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Ej. Retención semanal"
-                    className={inputClass}
-                  />
-                </Field>
-
-                <Field label="Equipo" full={subTeams.length === 0}>
+                <Field label="Equipo" full={kind !== "pax" && subTeams.length === 0}>
                   <select
                     value={team}
                     onChange={(e) => setTeam(e.target.value)}
@@ -375,76 +368,13 @@ export default function Index() {
                   </Field>
                 )}
 
-                <Field label="Nomenclatura (auto-generada)" full>
-                  <div className="rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900">
-                    {nomenclature}
-                  </div>
-                </Field>
-
-                <Field label="Rango de fechas" full>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-700">Fechas</span>
-                      <label className="flex items-center gap-2 text-xs text-slate-500">
-                        <input
-                          type="checkbox"
-                          checked={isRange}
-                          onChange={(e) => setIsRange(e.target.checked)}
-                          className="h-4 w-4 accent-brand-500"
-                        />
-                        Habilitar rango (max 30 días)
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <span className="mb-1 block text-xs text-slate-500">Inicio</span>
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className={inputClass + " bg-white"}
-                        />
-                      </div>
-                      {isRange && (
-                        <>
-                          <span className="pt-5 text-slate-400">→</span>
-                          <div className="flex-1">
-                            <span className="mb-1 block text-xs text-slate-500">Fin</span>
-                            <input
-                              type="date"
-                              value={endDate}
-                              onChange={(e) => setEndDate(e.target.value)}
-                              className={inputClass + " bg-white"}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </Field>
-
-                <Field label="Tipo" full>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.values(COMM_TYPES).map((t) => {
-                      const active = types.includes(t);
-                      const locked = isTypeLocked(t);
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => toggleType(t)}
-                          title={locked ? "Al menos un tipo es obligatorio" : undefined}
-                          className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition ${
-                            active
-                              ? "border-brand-500 bg-brand-500 text-white shadow-sm"
-                              : "border-slate-200 bg-white text-slate-600 hover:border-brand-300"
-                          } ${locked ? "cursor-not-allowed opacity-90" : ""}`}
-                        >
-                          {t} {active && "✓"}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <Field label="Nombre de campaña" full>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ej. Retención semanal"
+                    className={inputClass}
+                  />
                 </Field>
 
                 <Field label="País" full>
@@ -564,6 +494,78 @@ export default function Index() {
                       })}
                     </div>
                   )}
+                </Field>
+
+                <Field label="Nomenclatura (auto-generada)" full>
+                  <div className="rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900">
+                    {nomenclature}
+                  </div>
+                </Field>
+
+                <Field label="Rango de fechas" full>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">Fechas</span>
+                      <label className="flex items-center gap-2 text-xs text-slate-500">
+                        <input
+                          type="checkbox"
+                          checked={isRange}
+                          onChange={(e) => setIsRange(e.target.checked)}
+                          className="h-4 w-4 accent-brand-500"
+                        />
+                        Habilitar rango (max 30 días)
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <span className="mb-1 block text-xs text-slate-500">Inicio</span>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className={inputClass + " bg-white"}
+                        />
+                      </div>
+                      {isRange && (
+                        <>
+                          <span className="pt-5 text-slate-400">→</span>
+                          <div className="flex-1">
+                            <span className="mb-1 block text-xs text-slate-500">Fin</span>
+                            <input
+                              type="date"
+                              value={endDate}
+                              onChange={(e) => setEndDate(e.target.value)}
+                              className={inputClass + " bg-white"}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Field>
+
+                <Field label="Tipo" full>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.values(COMM_TYPES).map((t) => {
+                      const active = types.includes(t);
+                      const locked = isTypeLocked(t);
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => toggleType(t)}
+                          title={locked ? "Al menos un tipo es obligatorio" : undefined}
+                          className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition ${
+                            active
+                              ? "border-brand-500 bg-brand-500 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-brand-300"
+                          } ${locked ? "cursor-not-allowed opacity-90" : ""}`}
+                        >
+                          {t} {active && "✓"}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </Field>
 
                 <Field label={`Cohortes (${kind === "pax" ? "PAX" : "DRV"} IDs)`} full>

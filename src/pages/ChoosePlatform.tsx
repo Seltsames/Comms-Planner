@@ -25,7 +25,7 @@ const PLATFORM_META: Record<
  * redirected straight to that side without seeing this screen.
  */
 export default function ChoosePlatform() {
-  const { user, platformAccess, setAudienceKind, signOut } = useAuth();
+  const { platformAccess, setAudienceKind, signOut } = useAuth();
   const navigate = useNavigate();
 
   function enter(kind: AudienceKind) {
@@ -75,9 +75,7 @@ export default function ChoosePlatform() {
           <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-500 text-xl font-bold text-white">
             D
           </div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            ¿Dónde vas a trabajar hoy{user ? `, ${user.fullName.split(" ")[0]}` : ""}?
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-900">¿De qué equipo eres?</h1>
           <p className="mt-1 text-sm text-slate-500">
             Elige la plataforma. Todo lo que veas, crees y consultes queda
             aislado a la plataforma elegida.

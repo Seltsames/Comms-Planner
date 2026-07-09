@@ -67,7 +67,7 @@ export default function Navbar() {
               }`}
               aria-pressed={urlKind === "drv"}
             >
-              Conductores
+              Driver
             </button>
             <button
               type="button"
@@ -79,12 +79,12 @@ export default function Navbar() {
               }`}
               aria-pressed={urlKind === "pax"}
             >
-              Pasajeros
+              PAX
             </button>
           </div>
         ) : (
           <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
-            {urlKind === "pax" ? "Pasajeros" : "Conductores"}
+            {urlKind === "pax" ? "PAX" : "Driver"}
           </span>
         )}
 
