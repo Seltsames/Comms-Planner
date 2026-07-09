@@ -347,7 +347,7 @@ export default function Index() {
                   />
                 </Field>
 
-                <Field label="Equipo">
+                <Field label="Equipo" full={subTeams.length === 0}>
                   <select
                     value={team}
                     onChange={(e) => setTeam(e.target.value)}
@@ -359,8 +359,9 @@ export default function Index() {
                   </select>
                 </Field>
 
-                <Field label="Sub-equipo">
-                  {subTeams.length > 0 ? (
+                {/* PAX has a flat team list — hide the sub-team field entirely. */}
+                {subTeams.length > 0 && (
+                  <Field label="Sub-equipo">
                     <select
                       value={subTeam}
                       onChange={(e) => setSubTeam(e.target.value)}
@@ -371,12 +372,8 @@ export default function Index() {
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm italic text-slate-500">
-                      Sin sub-equipos
-                    </p>
-                  )}
-                </Field>
+                  </Field>
+                )}
 
                 <Field label="Nomenclatura (auto-generada)" full>
                   <div className="rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900">

@@ -13,8 +13,14 @@
 
 1. **Sign in** with a Google Workspace account in the `didi-labs.com` domain
    (server-side guard via a Supabase Auth hook).
-2. **Pick a side** at login via the URL (e.g. `/drv`, `/pax`) — or flip the
-   navbar pill to switch mid-session. The choice persists in `localStorage`.
+2. **Pick a side** after login on the `/choose-platform` screen, limited to
+   the platform(s) an admin granted in `profiles.platform_access` (users
+   with a single grant skip the chooser; admins always have both). Users
+   with both grants can also flip the navbar pill to switch mid-session.
+   The choice persists in `localStorage`, and everything the user sees,
+   creates and queries stays isolated to that platform (client route
+   guards + a `BEFORE INSERT` trigger on `drv.campaigns` / `pax.campaigns`
+   that rejects writes without the matching grant).
 3. **Plan a campaign** in a 2-step Builder scoped to the current side:
    - Step 1: pick team (DRV has the legacy four-team hierarchy with
      sub-teams; PAX is the flat six-team list `Brand Field / Growth /
@@ -39,8 +45,8 @@
    - `/admin/campaigns?kind={drv|pax}` — approve, reject or hard-delete any
      campaign on either side.
    - `/admin/users` — enable / disable accounts, grant / revoke the `admin`
-     role. Mutations go through the `admin-users` Edge Function
-     (service-role, audit-logged).
+     role, and toggle per-user DRV / PAX platform access. Mutations go
+     through the `admin-users` Edge Function (service-role, audit-logged).
    - Dashboard tab "Análisis" — server-side aggregates (`get_analytics_aggregates`
      / `get_analytics_aggregates_pax`) computed in Postgres so the client
      never downloads the raw `campaign_audience` table.
@@ -65,6 +71,7 @@ analytics aggregates are all enforced in PostgreSQL (see
 /login
 /auth/callback
 /pending-approval
+/choose-platform      → post-login platform picker (per-user access)
 
 # Driver-side app
 /drv                  → DRV builder (Index)
@@ -123,7 +130,7 @@ analytics aggregates are all enforced in PostgreSQL (see
 │   ├── pages/                    # Login, Index, MyCampaigns, Admin*, NotFound, PendingApproval
 │   └── types/database.ts         # hand-maintained Database typings (public + drv + pax)
 └── supabase/
-    ├── migrations/00001 … 00028  # schema split, RLS, RPCs for both drv + pax
+    ├── migrations/00001 … 00030  # schema split, RLS, RPCs, platform access
     └── functions/admin-users/    # Edge Function (Deno) — enable/disable/grant/revoke admin
 ```
 
@@ -131,8 +138,9 @@ analytics aggregates are all enforced in PostgreSQL (see
 
 ```
 public:
-  profiles, user_roles, admin_audit_log, app_role
-  has_role(), current_user_is_enabled(), custom_access_token_hook()
+  profiles (incl. platform_access), user_roles, admin_audit_log, app_role
+  has_role(), has_platform_access(), enforce_platform_access() trigger fn,
+  current_user_is_enabled(), custom_access_token_hook()
   handle_new_user() trigger, update_updated_at_column()
   save_campaign_v2, save_campaign_pax, cancel_*_pax, approve_*_pax,
   reject_*_pax, delete_*_pax, get_slot_availability_v2(_pax),

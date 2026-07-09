@@ -93,6 +93,7 @@ export type Database = {
         is_enabled: boolean;
         enabled_at: string | null;
         enabled_by: string | null;
+        platform_access: string[];
         created_at: string;
         updated_at: string;
       }>;

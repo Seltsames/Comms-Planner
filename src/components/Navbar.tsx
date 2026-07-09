@@ -3,7 +3,7 @@ import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { useAuth, audienceKindFromPath, type AudienceKind } from "@/lib/auth";
 
 export default function Navbar() {
-  const { user, role, signOut, audienceKind, setAudienceKind } = useAuth();
+  const { user, role, signOut, audienceKind, setAudienceKind, platformAccess } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -52,33 +52,41 @@ export default function Navbar() {
         </Link>
 
         {/* Audience-kind switcher — visual state derived from the URL so it
-            always reflects what the user is currently looking at. */}
-        <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
-          <button
-            type="button"
-            onClick={() => handleKindSwitch("drv")}
-            className={`rounded-lg px-3 py-1.5 transition ${
-              urlKind === "drv"
-                ? "bg-brand-500 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-            aria-pressed={urlKind === "drv"}
-          >
-            Conductores
-          </button>
-          <button
-            type="button"
-            onClick={() => handleKindSwitch("pax")}
-            className={`rounded-lg px-3 py-1.5 transition ${
-              urlKind === "pax"
-                ? "bg-brand-500 text-white"
-                : "text-slate-600 hover:bg-slate-100"
-            }`}
-            aria-pressed={urlKind === "pax"}
-          >
-            Pasajeros
-          </button>
-        </div>
+            always reflects what the user is currently looking at. Only
+            rendered when the user has access to both platforms; single-
+            platform users see a static label of their side instead. */}
+        {platformAccess.length > 1 ? (
+          <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
+            <button
+              type="button"
+              onClick={() => handleKindSwitch("drv")}
+              className={`rounded-lg px-3 py-1.5 transition ${
+                urlKind === "drv"
+                  ? "bg-brand-500 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              aria-pressed={urlKind === "drv"}
+            >
+              Conductores
+            </button>
+            <button
+              type="button"
+              onClick={() => handleKindSwitch("pax")}
+              className={`rounded-lg px-3 py-1.5 transition ${
+                urlKind === "pax"
+                  ? "bg-brand-500 text-white"
+                  : "text-slate-600 hover:bg-slate-100"
+              }`}
+              aria-pressed={urlKind === "pax"}
+            >
+              Pasajeros
+            </button>
+          </div>
+        ) : (
+          <span className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-600">
+            {urlKind === "pax" ? "Pasajeros" : "Conductores"}
+          </span>
+        )}
 
         <div className="flex items-center gap-1 text-sm">
           {/* Section nav links — scoped to whichever side the URL is on. */}

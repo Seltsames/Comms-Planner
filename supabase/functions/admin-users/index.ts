@@ -10,11 +10,16 @@ const ALLOWED_ACTIONS = new Set([
   "disable",
   "grant_admin",
   "revoke_admin",
+  "set_platform_access",
 ]);
+
+const VALID_PLATFORMS = new Set(["drv", "pax"]);
 
 interface RequestBody {
   action: string;
   targetUserId: string;
+  /** Only for set_platform_access: subset of ["drv", "pax"]. */
+  platforms?: string[];
 }
 
 Deno.serve(async (req: Request) => {
@@ -90,6 +95,18 @@ Deno.serve(async (req: Request) => {
 
   const { action, targetUserId } = body;
 
+  // Validate platforms payload for set_platform_access
+  let platforms: string[] = [];
+  if (action === "set_platform_access") {
+    if (!Array.isArray(body.platforms)) {
+      return json({ error: "Missing platforms array" }, 400);
+    }
+    platforms = [...new Set(body.platforms)];
+    if (platforms.some((p) => !VALID_PLATFORMS.has(p))) {
+      return json({ error: "Invalid platform value" }, 400);
+    }
+  }
+
   // Refuse to disable yourself
   if (targetUserId === callerId && (action === "disable" || action === "revoke_admin")) {
     return json(
@@ -124,6 +141,12 @@ Deno.serve(async (req: Request) => {
       .eq("user_id", targetUserId)
       .eq("role", "admin");
     if (error) result = { error: error.message };
+  } else if (action === "set_platform_access") {
+    const { error } = await admin
+      .from("profiles")
+      .update({ platform_access: platforms })
+      .eq("user_id", targetUserId);
+    if (error) result = { error: error.message };
   }
 
   if (result.error) return json({ error: result.error }, 500);
@@ -133,7 +156,7 @@ Deno.serve(async (req: Request) => {
     admin_id: callerId,
     target_user_id: targetUserId,
     action,
-    details: {},
+    details: action === "set_platform_access" ? { platforms } : {},
   });
   if (auditErr) console.error("Audit log write failed:", auditErr);
 

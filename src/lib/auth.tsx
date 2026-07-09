@@ -20,12 +20,15 @@ export interface AuthUser {
   fullName: string;
   role: Role | null;
   isEnabled: boolean;
+  /** Platforms this user may work on, assigned by an admin. Admins always get both. */
+  platformAccess: AudienceKind[];
 }
 
 interface AuthContextValue {
   user: AuthUser | null;
   role: Role | null;
   isEnabled: boolean;
+  platformAccess: AudienceKind[];
   loading: boolean;
   audienceKind: AudienceKind;
   setAudienceKind: (kind: AudienceKind) => void;
@@ -44,15 +47,33 @@ function readStoredAudienceKind(): AudienceKind {
   return raw === "pax" ? "pax" : "drv";
 }
 
+function sanitizePlatformAccess(raw: unknown): AudienceKind[] {
+  if (!Array.isArray(raw)) return [...AUDIENCE_KINDS];
+  return AUDIENCE_KINDS.filter((k) => raw.includes(k));
+}
+
 async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
-  const { data: profile, error: profileErr } = await supabase
+  let { data: profile, error: profileErr } = await supabase
     .from("profiles")
-    .select("email, full_name, is_enabled")
+    .select("email, full_name, is_enabled, platform_access")
     .eq("user_id", sessionUser.id)
     .maybeSingle();
 
   if (profileErr) {
-    console.error("Error fetching profile:", profileErr);
+    // Fallback for databases where migration 00030 (platform_access) has
+    // not been applied yet: retry without the column and default to both
+    // platforms so existing deployments keep working.
+    const retry = await supabase
+      .from("profiles")
+      .select("email, full_name, is_enabled")
+      .eq("user_id", sessionUser.id)
+      .maybeSingle();
+    if (retry.error) {
+      console.error("Error fetching profile:", retry.error);
+    } else {
+      profile = retry.data as typeof profile;
+      profileErr = null;
+    }
   }
 
   const { data: roleRow, error: roleErr } = await supabase
@@ -72,12 +93,21 @@ async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
     (sessionUser.user_metadata?.name as string | undefined) ??
     email.split("@")[0];
 
+  const role = (roleRow?.role as Role | undefined) ?? null;
+
   return {
     id: sessionUser.id,
     email,
     fullName,
-    role: (roleRow?.role as Role | undefined) ?? null,
+    role,
     isEnabled: profile?.is_enabled ?? false,
+    // Admins manage both sides, so they always get full access.
+    platformAccess:
+      role === "admin"
+        ? [...AUDIENCE_KINDS]
+        : sanitizePlatformAccess(
+            (profile as { platform_access?: unknown } | null)?.platform_access,
+          ),
   };
 }
 
@@ -203,6 +233,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       user,
       role: user?.role ?? null,
       isEnabled: user?.isEnabled ?? false,
+      platformAccess: user?.platformAccess ?? [],
       loading,
       audienceKind,
       setAudienceKind,
