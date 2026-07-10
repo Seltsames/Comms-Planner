@@ -36,6 +36,7 @@ interface CampaignColumns {
   status: CampaignStatus | string;
   approved_by: string | null;
   approved_at: string | null;
+  plan_id: string | null;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

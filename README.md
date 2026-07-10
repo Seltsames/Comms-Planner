@@ -144,7 +144,12 @@ public:
   handle_new_user() trigger, update_updated_at_column()
   save_campaign_v2, save_campaign_pax, cancel_*_pax, approve_*_pax,
   reject_*_pax, delete_*_pax, get_slot_availability_v2(_pax),
-  check_cohort_conflicts(_pax), get_analytics_aggregates(_pax)
+  check_cohort_conflicts(_pax), get_analytics_aggregates(_pax),
+  get_campaign_audience_counts_{drv,pax}
+
+approve_campaign(_pax) takes an optional p_plan_id: the approval code
+("Plan ID") the admin types when manually approving push campaigns;
+stored on {drv,pax}.campaigns.plan_id (00031).
 
 drv:
   campaigns, campaign_audience (drv_id), campaign_schedules
