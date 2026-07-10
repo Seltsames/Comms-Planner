@@ -44,6 +44,7 @@ export default function Index() {
   } | null>(null);
 
   const [citiesOpen, setCitiesOpen] = useState(false);
+  const [cityChipsOpen, setCityChipsOpen] = useState(false);
   const [citySearch, setCitySearch] = useState("");
   const citiesRef = useRef<HTMLDivElement>(null);
 
@@ -212,6 +213,19 @@ export default function Index() {
       }
     }
     return schedules;
+  }
+
+  function setRangeForChannel(actionKey: string, date: string, range: string | null) {
+    setSlotSelection((prev) => {
+      const channelSlots = { ...(prev[actionKey] ?? {}) };
+      const key = `${date}|RANGE`;
+      if (range === null) {
+        delete channelSlots[key];
+      } else {
+        channelSlots[key] = range;
+      }
+      return { ...prev, [actionKey]: channelSlots };
+    });
   }
 
   function toggleSlotForChannel(actionKey: string, date: string, slot: string) {
@@ -472,26 +486,45 @@ export default function Index() {
                     )}
                   </div>
                   {cityCodes.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {cityCodes.map((code) => {
-                        const city = CITIES_DATA.find((c) => c.id === code);
-                        return (
-                          <span
-                            key={code}
-                            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700"
-                          >
-                            {city?.name ?? code}
-                            <button
-                              type="button"
-                              onClick={() => toggleCity(code)}
-                              className="flex h-4 w-4 items-center justify-center rounded-full text-brand-500 transition hover:bg-brand-100 hover:text-brand-700"
-                              aria-label={`Quitar ${city?.name ?? code}`}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setCityChipsOpen((v) => !v)}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+                      >
+                        <span
+                          className={`inline-block text-[10px] transition-transform ${
+                            cityChipsOpen ? "rotate-90" : ""
+                          }`}
+                        >
+                          ▶
+                        </span>
+                        {cityChipsOpen ? "Ocultar ciudades" : "Ver ciudades seleccionadas"} (
+                        {cityCodes.length})
+                      </button>
+                      {cityChipsOpen && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {cityCodes.map((code) => {
+                            const city = CITIES_DATA.find((c) => c.id === code);
+                            return (
+                              <span
+                                key={code}
+                                className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700"
+                              >
+                                {city?.name ?? code}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCity(code)}
+                                  className="flex h-4 w-4 items-center justify-center rounded-full text-brand-500 transition hover:bg-brand-100 hover:text-brand-700"
+                                  aria-label={`Quitar ${city?.name ?? code}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </Field>
@@ -641,7 +674,10 @@ export default function Index() {
                 <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {actionKeys.map((actionKey) => {
                     const isPope = types.includes(COMM_TYPES.POPE);
-                    const isRangeOnly = actionKey === "Pop Up" || actionKey === "XPanel";
+                    // Every Ad Placement channel schedules by free time range
+                    // (desde–hasta) instead of hourly slots.
+                    const isRangeOnly =
+                      ACTION_KEYS_BY_KIND[kind][COMM_TYPES.AD_PLACEMENT].includes(actionKey);
 
                     const conflictingKey = actionKey === "Push out" ? "Whatsapp" : actionKey === "Whatsapp" ? "Push out" : null;
                     const blockedDates = new Set<string>();
@@ -663,6 +699,7 @@ export default function Index() {
                         endDate={isRange ? endDate : startDate}
                         selectedSlots={slotSelection[actionKey] ?? {}}
                         onToggle={(date, slot) => toggleSlotForChannel(actionKey, date, slot)}
+                        onRangeChange={(date, range) => setRangeForChannel(actionKey, date, range)}
                         isPope={isPope}
                         isRangeOnly={isRangeOnly}
                         blockedDates={blockedDates}
