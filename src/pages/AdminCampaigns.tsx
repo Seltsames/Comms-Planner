@@ -6,7 +6,9 @@ import {
   approveCampaignRpc,
   rejectCampaignRpc,
   deleteCampaignHardRpc,
+  setCampaignEventIdRpc,
 } from "@/lib/queries";
+import { EventIdInput } from "@/components/EventIdInput";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
@@ -187,6 +189,7 @@ export default function AdminCampaigns() {
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Nombre</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Event ID</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Usuario</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Tipo</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Estado</th>
@@ -207,6 +210,15 @@ export default function AdminCampaigns() {
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-800">{c.name}</div>
                     <div className="text-xs text-slate-400">{c.team}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <EventIdInput
+                      value={c.event_id}
+                      onSave={async (eventId) => {
+                        await setCampaignEventIdRpc(c.id, c.kind, eventId);
+                        await refresh();
+                      }}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {profile?.email ? (

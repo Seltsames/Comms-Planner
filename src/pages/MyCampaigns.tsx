@@ -1,9 +1,10 @@
 import { useState, useMemo } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import { useAuth, type AudienceKind } from "@/lib/auth";
-import { fetchUserCampaigns, cancelCampaignRpc } from "@/lib/queries";
+import { fetchUserCampaigns, cancelCampaignRpc, setCampaignEventIdRpc } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
+import { EventIdInput } from "@/components/EventIdInput";
 
 export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
   const { user } = useAuth();
@@ -75,6 +76,10 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
                 campaign={campaign}
                 onCancel={handleCancel}
                 cancellingId={cancellingId}
+                onSaveEventId={async (eventId) => {
+                  await setCampaignEventIdRpc(campaign.id, kind, eventId);
+                  await refresh();
+                }}
               />
             ))}
           </div>
@@ -98,14 +103,16 @@ interface CampaignCardProps {
     status: string;
     action_keys: string[];
     csv_file_name: string | null;
+    event_id: string | null;
     created_at: string;
     updated_at: string;
   };
   onCancel: (id: string) => void;
   cancellingId: string | null;
+  onSaveEventId: (eventId: string) => Promise<void>;
 }
 
-function CampaignCard({ campaign, onCancel, cancellingId }: CampaignCardProps) {
+function CampaignCard({ campaign, onCancel, cancellingId, onSaveEventId }: CampaignCardProps) {
   const start = new Date(campaign.start_date + "T12:00:00");
   const end = new Date(campaign.end_date + "T12:00:00");
   const dateRange =
@@ -116,7 +123,10 @@ function CampaignCard({ campaign, onCancel, cancellingId }: CampaignCardProps) {
   return (
     <Card subtitle={dateRange}>
       <div className="mb-3 flex items-center justify-between">
-        <span className="font-semibold text-slate-800">{campaign.name}</span>
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-slate-800">{campaign.name}</span>
+          <EventIdInput value={campaign.event_id} onSave={onSaveEventId} />
+        </div>
         <div className="flex items-center gap-2">
           {campaign.status !== "cancelled" && (
             <button
