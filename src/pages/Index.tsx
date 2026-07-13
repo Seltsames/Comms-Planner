@@ -296,7 +296,14 @@ export default function Index() {
       }
       setSaveSuccess(true);
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : "Error guardando campaña");
+      // Supabase errors are plain objects (PostgrestError), not Error
+      // instances — read .message from either shape so the real cause
+      // is always surfaced.
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Error guardando campaña";
+      setSaveError(msg);
     } finally {
       setSaveLoading(false);
     }
