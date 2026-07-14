@@ -5,6 +5,7 @@ import Login from "@/pages/Login";
 import AuthCallback from "@/components/auth/AuthCallback";
 import PendingApproval from "@/pages/PendingApproval";
 import Index from "@/pages/Index";
+import ChoosePlatform from "@/pages/ChoosePlatform";
 import MyCampaigns from "@/pages/MyCampaigns";
 import AdminUsers from "@/pages/AdminUsers";
 import AdminCampaigns from "@/pages/AdminCampaigns";
@@ -64,6 +65,32 @@ function KindScoped({ kind, children }: { kind: AudienceKind; children: React.Re
   return <CampaignBuilderProvider kind={kind}>{children}</CampaignBuilderProvider>;
 }
 
+/**
+ * Blocks a DRV/PAX route when the admin did not grant that platform to
+ * the user. Redirects home, where HomeRedirect re-routes to a platform
+ * the user *can* use (or to the chooser / "no access" screen).
+ */
+function PlatformGuard({ kind, children }: { kind: AudienceKind; children: React.ReactNode }) {
+  const { loading, platformAccess } = useAuth();
+  if (loading) return <FullScreenLoader />;
+  if (!platformAccess.includes(kind)) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
+/**
+ * Landing decision for "/": with both platforms granted the user picks
+ * one (ChoosePlatform); with exactly one they go straight to it; with
+ * none, ChoosePlatform shows the "no access" message.
+ */
+function HomeRedirect() {
+  const { user, loading, isEnabled, platformAccess } = useAuth();
+  if (loading) return <FullScreenLoader />;
+  if (!user) return <Navigate to="/login" replace />;
+  if (!isEnabled) return <Navigate to="/pending-approval" replace />;
+  if (platformAccess.length === 1) return <Navigate to={`/${platformAccess[0]}`} replace />;
+  return <Navigate to="/choose-platform" replace />;
+}
+
 export default function App() {
   return (
     <Routes>
@@ -85,16 +112,29 @@ export default function App() {
         }
       />
 
+      {/* Platform chooser — shown after login when the user has access to
+          more than one platform. */}
+      <Route
+        path="/choose-platform"
+        element={
+          <Protected>
+            <ChoosePlatform />
+          </Protected>
+        }
+      />
+
       {/* DRV app routes */}
       <Route
         path="/drv"
         element={
           <Protected>
-            <KindScoped kind="drv">
-              <Layout>
-                <Index />
-              </Layout>
-            </KindScoped>
+            <PlatformGuard kind="drv">
+              <KindScoped kind="drv">
+                <Layout>
+                  <Index />
+                </Layout>
+              </KindScoped>
+            </PlatformGuard>
           </Protected>
         }
       />
@@ -102,11 +142,13 @@ export default function App() {
         path="/drv/my-campaigns"
         element={
           <Protected>
-            <KindScoped kind="drv">
-              <Layout>
-                <MyCampaigns kind="drv" />
-              </Layout>
-            </KindScoped>
+            <PlatformGuard kind="drv">
+              <KindScoped kind="drv">
+                <Layout>
+                  <MyCampaigns kind="drv" />
+                </Layout>
+              </KindScoped>
+            </PlatformGuard>
           </Protected>
         }
       />
@@ -116,11 +158,13 @@ export default function App() {
         path="/pax"
         element={
           <Protected>
-            <KindScoped kind="pax">
-              <Layout>
-                <Index />
-              </Layout>
-            </KindScoped>
+            <PlatformGuard kind="pax">
+              <KindScoped kind="pax">
+                <Layout>
+                  <Index />
+                </Layout>
+              </KindScoped>
+            </PlatformGuard>
           </Protected>
         }
       />
@@ -128,11 +172,13 @@ export default function App() {
         path="/pax/my-campaigns"
         element={
           <Protected>
-            <KindScoped kind="pax">
-              <Layout>
-                <MyCampaigns kind="pax" />
-              </Layout>
-            </KindScoped>
+            <PlatformGuard kind="pax">
+              <KindScoped kind="pax">
+                <Layout>
+                  <MyCampaigns kind="pax" />
+                </Layout>
+              </KindScoped>
+            </PlatformGuard>
           </Protected>
         }
       />
@@ -159,8 +205,11 @@ export default function App() {
         }
       />
 
-      {/* Backwards compatibility: redirect legacy routes to the DRV namespace. */}
-      <Route path="/" element={<Navigate to="/drv" replace />} />
+      {/* Landing: route to the platform(s) the user has access to. */}
+      <Route path="/" element={<HomeRedirect />} />
+
+      {/* Backwards compatibility: redirect legacy routes to the DRV
+          namespace (PlatformGuard re-routes users without DRV access). */}
       <Route path="/my-campaigns" element={<Navigate to="/drv/my-campaigns" replace />} />
       <Route path="/admin/campaigns/drv" element={<Navigate to="/admin/campaigns" replace state={{ kind: "drv" }} />} />
 

@@ -33,6 +33,7 @@ export function CohortUploader({
   const [activeKey, setActiveKey] = useState<string | null>(null);
   const [progress, setProgress] = useState<CohortParseProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [cityListOpen, setCityListOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
@@ -168,7 +169,24 @@ export function CohortUploader({
         </div>
       ) : (
         <div className="space-y-3">
-          {selectedCityCodes.map((code) => {
+          <button
+            type="button"
+            onClick={() => setCityListOpen((v) => !v)}
+            className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+          >
+            <span
+              className={`inline-block text-[10px] transition-transform ${
+                cityListOpen ? "rotate-90" : ""
+              }`}
+            >
+              ▶
+            </span>
+            {cityListOpen ? "Ocultar ciudades" : "Ver ciudades"} (
+            {selectedCityCodes.filter((c) => value.byCity[c]).length} de{" "}
+            {selectedCityCodes.length} con CSV)
+          </button>
+          {cityListOpen &&
+            selectedCityCodes.map((code) => {
             const city = CITIES_DATA.find((c) => c.id === code);
             const cityName = city?.name ?? code;
             const cohort = value.byCity[code];
@@ -207,7 +225,7 @@ export function CohortUploader({
                 />
               </div>
             );
-          })}
+            })}
           {value.general && (
             <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
               Tienes una cohorte general cargada. Las ciudades con CSV propio la reemplazan; las
@@ -329,6 +347,7 @@ function CohortResolutionPreview({
   selectedCityCodes: string[];
   value: CohortState;
 }) {
+  const [detailOpen, setDetailOpen] = useState(false);
   const resolution = selectedCityCodes.map((code) => {
     const city = CITIES_DATA.find((c) => c.id === code);
     const cityName = city?.name ?? code;
@@ -354,33 +373,48 @@ function CohortResolutionPreview({
         allResolved ? "border-slate-200 bg-white" : "border-amber-200 bg-amber-50"
       }`}
     >
-      <div className="mb-2 flex items-center justify-between">
-        <span className="font-semibold text-slate-700">Resolución de cohortes</span>
+      <button
+        type="button"
+        onClick={() => setDetailOpen((v) => !v)}
+        className="flex w-full items-center justify-between"
+      >
+        <span className="flex items-center gap-1.5 font-semibold text-slate-700">
+          <span
+            className={`inline-block text-[10px] text-slate-400 transition-transform ${
+              detailOpen ? "rotate-90" : ""
+            }`}
+          >
+            ▶
+          </span>
+          Resolución de cohortes ({resolution.length} ciudades)
+        </span>
         <span className="text-slate-500">
           {allResolved ? "✓ Completa" : "Faltan cohortes"} · {formatNumber(totalUnique)} DRVs únicos
         </span>
-      </div>
-      <ul className="space-y-1">
-        {resolution.map((r) => (
-          <li key={r.code} className="flex items-center justify-between text-slate-600">
-            <span>{r.cityName}</span>
-            <span className="text-right">
-              {r.source === "none" ? (
-                <span className="font-semibold text-amber-700">— sin cohorte</span>
-              ) : (
-                <>
-                  <span className="text-slate-500">
-                    {r.source === "per-city" ? "por ciudad" : "general"} ·{" "}
-                  </span>
-                  <span className="font-semibold text-slate-700">
-                    {formatNumber(r.count)} DRVs
-                  </span>
-                </>
-              )}
-            </span>
-          </li>
-        ))}
-      </ul>
+      </button>
+      {detailOpen && (
+        <ul className="mt-2 space-y-1">
+          {resolution.map((r) => (
+            <li key={r.code} className="flex items-center justify-between text-slate-600">
+              <span>{r.cityName}</span>
+              <span className="text-right">
+                {r.source === "none" ? (
+                  <span className="font-semibold text-amber-700">— sin cohorte</span>
+                ) : (
+                  <>
+                    <span className="text-slate-500">
+                      {r.source === "per-city" ? "por ciudad" : "general"} ·{" "}
+                    </span>
+                    <span className="font-semibold text-slate-700">
+                      {formatNumber(r.count)} DRVs
+                    </span>
+                  </>
+                )}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

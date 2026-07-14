@@ -2,10 +2,13 @@ import { useMemo, useState } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
   fetchAllCampaignsBoth,
+  fetchAudienceCountsBoth,
   approveCampaignRpc,
   rejectCampaignRpc,
   deleteCampaignHardRpc,
+  setCampaignEventIdRpc,
 } from "@/lib/queries";
+import { EventIdInput } from "@/components/EventIdInput";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
@@ -18,14 +21,28 @@ interface ProfileLookup {
 
 type KindFilter = "all" | AudienceKind;
 
+/** A campaign needs a Plan ID on manual approval when it includes any push channel. */
+function hasPushChannel(actionKeys: string[]): boolean {
+  return actionKeys.some((k) => k.toLowerCase().includes("push"));
+}
+
 export default function AdminCampaigns() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  // Plan ID drafts typed by the admin, keyed by `${kind}-${campaign_id}`.
+  const [planIdDrafts, setPlanIdDrafts] = useState<Record<string, string>>({});
 
   // Single call returns campaigns from BOTH schemas, tagged with `kind`.
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
     () => fetchAllCampaignsBoth(),
+    60_000,
+    [],
+  );
+
+  // Distinct audience ids per campaign, aggregated in Postgres.
+  const { data: audienceCounts } = useAutoRefresh(
+    () => fetchAudienceCountsBoth(),
     60_000,
     [],
   );
@@ -69,11 +86,22 @@ export default function AdminCampaigns() {
     return c;
   }, [campaigns]);
 
-  async function handleApprove(id: string, kind: AudienceKind) {
+  async function handleApprove(id: string, kind: AudienceKind, actionKeys: string[]) {
+    const rowKey = `${kind}-${id}`;
+    const planId = planIdDrafts[rowKey]?.trim() ?? "";
+    if (hasPushChannel(actionKeys) && !planId) {
+      alert("Escribe el Plan ID para aprobar una campaña con push.");
+      return;
+    }
     if (!confirm("Aprobar esta campaña?")) return;
     setActionId(id);
     try {
-      await approveCampaignRpc(id, kind);
+      await approveCampaignRpc(id, kind, planId || undefined);
+      setPlanIdDrafts((prev) => {
+        const next = { ...prev };
+        delete next[rowKey];
+        return next;
+      });
       await refresh();
     } catch (e: unknown) {
       alert("Error: " + (e as Error).message);
@@ -161,13 +189,16 @@ export default function AdminCampaigns() {
           <thead className="bg-slate-50">
             <tr>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Nombre</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Event ID</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Usuario</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Tipo</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Estado</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Fechas</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">País</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Ciudades</th>
+              <th className="px-4 py-3 text-right font-semibold text-slate-600">Cohort</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Canales</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Plan ID</th>
               <th className="px-4 py-3 text-right font-semibold text-slate-600">Acciones</th>
             </tr>
           </thead>
@@ -179,6 +210,15 @@ export default function AdminCampaigns() {
                   <td className="px-4 py-3">
                     <div className="font-medium text-slate-800">{c.name}</div>
                     <div className="text-xs text-slate-400">{c.team}</div>
+                  </td>
+                  <td className="px-4 py-3">
+                    <EventIdInput
+                      value={c.event_id}
+                      onSave={async (eventId) => {
+                        await setCampaignEventIdRpc(c.id, c.kind, eventId);
+                        await refresh();
+                      }}
+                    />
                   </td>
                   <td className="px-4 py-3 text-slate-600">
                     {profile?.email ? (
@@ -210,13 +250,38 @@ export default function AdminCampaigns() {
                   </td>
                   <td className="px-4 py-3 text-slate-600">{c.country}</td>
                   <td className="px-4 py-3 text-slate-600">{c.city_codes.length}</td>
+                  <td className="px-4 py-3 text-right font-medium text-slate-700">
+                    {audienceCounts?.[`${c.kind}-${c.id}`] !== undefined
+                      ? formatNumber(audienceCounts[`${c.kind}-${c.id}`])
+                      : "—"}
+                  </td>
                   <td className="px-4 py-3 text-slate-600">{c.action_keys.join(", ")}</td>
+                  <td className="px-4 py-3">
+                    {c.status === "pending" && hasPushChannel(c.action_keys) ? (
+                      <input
+                        type="text"
+                        value={planIdDrafts[`${c.kind}-${c.id}`] ?? ""}
+                        onChange={(e) =>
+                          setPlanIdDrafts((prev) => ({
+                            ...prev,
+                            [`${c.kind}-${c.id}`]: e.target.value,
+                          }))
+                        }
+                        placeholder="Plan ID"
+                        className="w-28 rounded-lg border border-slate-200 bg-white px-2 py-1 text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
+                      />
+                    ) : c.plan_id ? (
+                      <span className="font-mono text-xs text-slate-700">{c.plan_id}</span>
+                    ) : (
+                      <span className="text-xs text-slate-400">—</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">
                       {c.status === "pending" && (
                         <>
                           <button
-                            onClick={() => handleApprove(c.id, c.kind)}
+                            onClick={() => handleApprove(c.id, c.kind, c.action_keys)}
                             disabled={actionId === c.id}
                             className="rounded bg-green-100 px-2 py-1 text-xs font-medium text-green-700 hover:bg-green-200 disabled:opacity-50"
                           >

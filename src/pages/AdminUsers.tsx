@@ -3,6 +3,10 @@ import { Card, PageHeader } from "@/components/Ui";
 import { useAuth } from "@/lib/auth";
 import { supabase } from "@/lib/supabase";
 
+type Platform = "drv" | "pax";
+const PLATFORMS: readonly Platform[] = ["drv", "pax"] as const;
+const PLATFORM_LABELS: Record<Platform, string> = { drv: "DRV", pax: "PAX" };
+
 interface AdminUserRow {
   user_id: string;
   email: string;
@@ -11,6 +15,7 @@ interface AdminUserRow {
   enabled_at: string | null;
   created_at: string;
   role: "admin" | "normal" | null;
+  platform_access: Platform[];
 }
 
 type ActionResult = { ok: true } | { ok: false; error: string };
@@ -26,11 +31,21 @@ export default function AdminUsers() {
     setLoading(true);
     setError(null);
 
-    // Fetch all profiles (admin can read all)
-    const { data: profiles, error: pErr } = await supabase
+    // Fetch all profiles (admin can read all). Falls back to the legacy
+    // column set when migration 00030 (platform_access) is not applied yet.
+    let { data: profiles, error: pErr } = await supabase
       .from("profiles")
-      .select("user_id, email, full_name, is_enabled, enabled_at, created_at")
+      .select("user_id, email, full_name, is_enabled, enabled_at, created_at, platform_access")
       .order("created_at", { ascending: false });
+
+    if (pErr) {
+      const retry = await supabase
+        .from("profiles")
+        .select("user_id, email, full_name, is_enabled, enabled_at, created_at")
+        .order("created_at", { ascending: false });
+      profiles = (retry.data ?? null) as typeof profiles;
+      pErr = retry.error;
+    }
 
     if (pErr) {
       setError(pErr.message);
@@ -54,15 +69,21 @@ export default function AdminUsers() {
       roleByUser.set(r.user_id, r.role as "admin" | "normal");
     }
 
-    const rows: AdminUserRow[] = (profiles ?? []).map((p) => ({
-      user_id: p.user_id,
-      email: p.email,
-      full_name: p.full_name,
-      is_enabled: p.is_enabled,
-      enabled_at: p.enabled_at,
-      created_at: p.created_at,
-      role: roleByUser.get(p.user_id) ?? null,
-    }));
+    const rows: AdminUserRow[] = (profiles ?? []).map((p) => {
+      const rawAccess = (p as { platform_access?: unknown }).platform_access;
+      return {
+        user_id: p.user_id,
+        email: p.email,
+        full_name: p.full_name,
+        is_enabled: p.is_enabled,
+        enabled_at: p.enabled_at,
+        created_at: p.created_at,
+        role: roleByUser.get(p.user_id) ?? null,
+        platform_access: Array.isArray(rawAccess)
+          ? PLATFORMS.filter((k) => rawAccess.includes(k))
+          : [...PLATFORMS],
+      };
+    });
 
     setUsers(rows);
     setLoading(false);
@@ -73,14 +94,15 @@ export default function AdminUsers() {
   }, [load]);
 
   async function callAdminFn(
-    action: "enable" | "disable" | "grant_admin" | "revoke_admin",
+    action: "enable" | "disable" | "grant_admin" | "revoke_admin" | "set_platform_access",
     targetUserId: string,
+    platforms?: Platform[],
   ): Promise<ActionResult> {
     const { data, error: fnErr } = await supabase.functions.invoke<{
       success: boolean;
       error?: string;
     }>("admin-users", {
-      body: { action, targetUserId },
+      body: { action, targetUserId, ...(platforms ? { platforms } : {}) },
     });
 
     if (fnErr) {
@@ -110,6 +132,19 @@ export default function AdminUsers() {
     const res = await callAdminFn(action, u.user_id);
     if (!res.ok) setError(res.error);
     await load();
+    setBusyId(null);
+  }
+
+  async function togglePlatform(u: AdminUserRow, platform: Platform) {
+    setBusyId(u.user_id);
+    setError(null);
+    const next = u.platform_access.includes(platform)
+      ? u.platform_access.filter((p) => p !== platform)
+      : [...u.platform_access, platform];
+    const res = await callAdminFn("set_platform_access", u.user_id, next);
+    if (!res.ok) setError(res.error);
+    await load();
+    await refreshUser();
     setBusyId(null);
   }
 
@@ -153,6 +188,7 @@ export default function AdminUsers() {
                   <th className="py-3 pr-4">Usuario</th>
                   <th className="py-3 pr-4">Estado</th>
                   <th className="py-3 pr-4">Rol</th>
+                  <th className="py-3 pr-4">Plataformas</th>
                   <th className="py-3 pr-4">Creado</th>
                   <th className="py-3 pr-4 text-right">Acciones</th>
                 </tr>
@@ -189,6 +225,37 @@ export default function AdminUsers() {
                           </span>
                         ) : (
                           <span className="text-xs text-slate-500">Normal</span>
+                        )}
+                      </td>
+                      <td className="py-3 pr-4">
+                        {u.role === "admin" ? (
+                          <span className="text-xs text-slate-500">Todas (admin)</span>
+                        ) : (
+                          <div className="flex gap-1">
+                            {PLATFORMS.map((p) => {
+                              const active = u.platform_access.includes(p);
+                              return (
+                                <button
+                                  key={p}
+                                  type="button"
+                                  onClick={() => togglePlatform(u, p)}
+                                  disabled={isBusy}
+                                  title={
+                                    active
+                                      ? `Quitar acceso a ${PLATFORM_LABELS[p]}`
+                                      : `Otorgar acceso a ${PLATFORM_LABELS[p]}`
+                                  }
+                                  className={`rounded-full border px-2 py-0.5 text-xs font-semibold transition disabled:opacity-50 ${
+                                    active
+                                      ? "border-brand-200 bg-brand-50 text-brand-700 hover:border-brand-300"
+                                      : "border-slate-200 bg-slate-50 text-slate-400 hover:border-slate-300"
+                                  }`}
+                                >
+                                  {PLATFORM_LABELS[p]}
+                                </button>
+                              );
+                            })}
+                          </div>
                         )}
                       </td>
                       <td className="py-3 pr-4 text-xs text-slate-500">

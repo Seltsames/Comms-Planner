@@ -123,6 +123,27 @@ export async function fetchAllCampaignsBoth(): Promise<AdminCampaignRow[]> {
   ];
 }
 
+/**
+ * Distinct audience ids per campaign (server-side aggregate — the client
+ * never downloads the raw campaign_audience rows). Returns a map keyed by
+ * `${kind}-${campaign_id}` so DRV and PAX rows never collide.
+ */
+export async function fetchAudienceCountsBoth(): Promise<Record<string, number>> {
+  const fetchKind = async (kind: AudienceKind) => {
+    const { data, error } = await supabase.rpc(`get_campaign_audience_counts_${kind}`);
+    if (error) throw error;
+    return (data ?? []) as Array<{ campaign_id: string; audience_count: number }>;
+  };
+  const [drv, pax] = await Promise.all([
+    fetchKind("drv").catch(() => []),
+    fetchKind("pax").catch(() => []),
+  ]);
+  const map: Record<string, number> = {};
+  for (const row of drv) map[`drv-${row.campaign_id}`] = Number(row.audience_count);
+  for (const row of pax) map[`pax-${row.campaign_id}`] = Number(row.audience_count);
+  return map;
+}
+
 export async function fetchCampaignById(
   id: string,
   kind: AudienceKind,
@@ -150,9 +171,26 @@ export async function cancelCampaignRpc(campaignId: string, kind: AudienceKind):
   if (error) throw error;
 }
 
-export async function approveCampaignRpc(campaignId: string, kind: AudienceKind): Promise<void> {
+export async function approveCampaignRpc(
+  campaignId: string,
+  kind: AudienceKind,
+  planId?: string,
+): Promise<void> {
   const { error } = await supabase.rpc(rpcName("approve_campaign", kind), {
     p_campaign_id: campaignId,
+    p_plan_id: planId?.trim() || null,
+  });
+  if (error) throw error;
+}
+
+export async function setCampaignEventIdRpc(
+  campaignId: string,
+  kind: AudienceKind,
+  eventId: string,
+): Promise<void> {
+  const { error } = await supabase.rpc(rpcName("set_campaign_event_id", kind), {
+    p_campaign_id: campaignId,
+    p_event_id: eventId,
   });
   if (error) throw error;
 }

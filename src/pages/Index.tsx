@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
-  ACTION_KEYS_BY_TYPE,
+  ACTION_KEYS_BY_KIND,
   COMM_TYPES,
   CITIES_DATA,
   COUNTRIES,
@@ -44,6 +44,7 @@ export default function Index() {
   } | null>(null);
 
   const [citiesOpen, setCitiesOpen] = useState(false);
+  const [cityChipsOpen, setCityChipsOpen] = useState(false);
   const [citySearch, setCitySearch] = useState("");
   const citiesRef = useRef<HTMLDivElement>(null);
 
@@ -72,8 +73,8 @@ export default function Index() {
   );
 
   const availableActionKeys = useMemo(
-    () => Array.from(new Set(types.flatMap((t) => ACTION_KEYS_BY_TYPE[t] ?? []))),
-    [types],
+    () => Array.from(new Set(types.flatMap((t) => ACTION_KEYS_BY_KIND[kind][t] ?? []))),
+    [types, kind],
   );
 
   const effectiveDrvIds = useMemo(
@@ -214,6 +215,19 @@ export default function Index() {
     return schedules;
   }
 
+  function setRangeForChannel(actionKey: string, date: string, range: string | null) {
+    setSlotSelection((prev) => {
+      const channelSlots = { ...(prev[actionKey] ?? {}) };
+      const key = `${date}|RANGE`;
+      if (range === null) {
+        delete channelSlots[key];
+      } else {
+        channelSlots[key] = range;
+      }
+      return { ...prev, [actionKey]: channelSlots };
+    });
+  }
+
   function toggleSlotForChannel(actionKey: string, date: string, slot: string) {
     setSlotSelection((prev) => {
       const channelSlots = prev[actionKey] ?? {};
@@ -282,7 +296,14 @@ export default function Index() {
       }
       setSaveSuccess(true);
     } catch (e: unknown) {
-      setSaveError(e instanceof Error ? e.message : "Error guardando campaña");
+      // Supabase errors are plain objects (PostgrestError), not Error
+      // instances — read .message from either shape so the real cause
+      // is always surfaced.
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Error guardando campaña";
+      setSaveError(msg);
     } finally {
       setSaveLoading(false);
     }
@@ -332,22 +353,15 @@ export default function Index() {
               subtitle={`Define el público objetivo y carga los cohortes (${kind === "pax" ? "pasajeros" : "conductores"})`}
             >
               <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-                <Field label="Usuario" full>
+                {/* PAX: Usuario + Equipo share one row (flat team list).
+                    DRV: Usuario full-width, then Equipo + Sub-equipo row. */}
+                <Field label="Usuario" full={kind !== "pax"}>
                   <div className={inputClass + " cursor-default"}>
                     {extractUsername(user?.email ?? "") || "Sin usuario"}
                   </div>
                 </Field>
 
-                <Field label="Nombre de campaña" full>
-                  <input
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Ej. Retención semanal"
-                    className={inputClass}
-                  />
-                </Field>
-
-                <Field label="Equipo">
+                <Field label="Equipo" full={kind !== "pax" && subTeams.length === 0}>
                   <select
                     value={team}
                     onChange={(e) => setTeam(e.target.value)}
@@ -359,8 +373,9 @@ export default function Index() {
                   </select>
                 </Field>
 
-                <Field label="Sub-equipo">
-                  {subTeams.length > 0 ? (
+                {/* PAX has a flat team list — hide the sub-team field entirely. */}
+                {subTeams.length > 0 && (
+                  <Field label="Sub-equipo">
                     <select
                       value={subTeam}
                       onChange={(e) => setSubTeam(e.target.value)}
@@ -371,83 +386,16 @@ export default function Index() {
                         <option key={s} value={s}>{s}</option>
                       ))}
                     </select>
-                  ) : (
-                    <p className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-2 text-sm italic text-slate-500">
-                      Sin sub-equipos
-                    </p>
-                  )}
-                </Field>
+                  </Field>
+                )}
 
-                <Field label="Nomenclatura (auto-generada)" full>
-                  <div className="rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900">
-                    {nomenclature}
-                  </div>
-                </Field>
-
-                <Field label="Rango de fechas" full>
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className="text-sm font-medium text-slate-700">Fechas</span>
-                      <label className="flex items-center gap-2 text-xs text-slate-500">
-                        <input
-                          type="checkbox"
-                          checked={isRange}
-                          onChange={(e) => setIsRange(e.target.checked)}
-                          className="h-4 w-4 accent-brand-500"
-                        />
-                        Habilitar rango (max 30 días)
-                      </label>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="flex-1">
-                        <span className="mb-1 block text-xs text-slate-500">Inicio</span>
-                        <input
-                          type="date"
-                          value={startDate}
-                          onChange={(e) => setStartDate(e.target.value)}
-                          className={inputClass + " bg-white"}
-                        />
-                      </div>
-                      {isRange && (
-                        <>
-                          <span className="pt-5 text-slate-400">→</span>
-                          <div className="flex-1">
-                            <span className="mb-1 block text-xs text-slate-500">Fin</span>
-                            <input
-                              type="date"
-                              value={endDate}
-                              onChange={(e) => setEndDate(e.target.value)}
-                              className={inputClass + " bg-white"}
-                            />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </Field>
-
-                <Field label="Tipo" full>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.values(COMM_TYPES).map((t) => {
-                      const active = types.includes(t);
-                      const locked = isTypeLocked(t);
-                      return (
-                        <button
-                          key={t}
-                          type="button"
-                          onClick={() => toggleType(t)}
-                          title={locked ? "Al menos un tipo es obligatorio" : undefined}
-                          className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition ${
-                            active
-                              ? "border-brand-500 bg-brand-500 text-white shadow-sm"
-                              : "border-slate-200 bg-white text-slate-600 hover:border-brand-300"
-                          } ${locked ? "cursor-not-allowed opacity-90" : ""}`}
-                        >
-                          {t} {active && "✓"}
-                        </button>
-                      );
-                    })}
-                  </div>
+                <Field label="Nombre de campaña" full>
+                  <input
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder="Ej. Retención semanal"
+                    className={inputClass}
+                  />
                 </Field>
 
                 <Field label="País" full>
@@ -545,28 +493,119 @@ export default function Index() {
                     )}
                   </div>
                   {cityCodes.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5">
-                      {cityCodes.map((code) => {
-                        const city = CITIES_DATA.find((c) => c.id === code);
-                        return (
-                          <span
-                            key={code}
-                            className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700"
-                          >
-                            {city?.name ?? code}
-                            <button
-                              type="button"
-                              onClick={() => toggleCity(code)}
-                              className="flex h-4 w-4 items-center justify-center rounded-full text-brand-500 transition hover:bg-brand-100 hover:text-brand-700"
-                              aria-label={`Quitar ${city?.name ?? code}`}
-                            >
-                              ×
-                            </button>
-                          </span>
-                        );
-                      })}
+                    <div className="mt-2">
+                      <button
+                        type="button"
+                        onClick={() => setCityChipsOpen((v) => !v)}
+                        className="flex items-center gap-1.5 text-xs font-semibold text-brand-600 transition hover:text-brand-700"
+                      >
+                        <span
+                          className={`inline-block text-[10px] transition-transform ${
+                            cityChipsOpen ? "rotate-90" : ""
+                          }`}
+                        >
+                          ▶
+                        </span>
+                        {cityChipsOpen ? "Ocultar ciudades" : "Ver ciudades seleccionadas"} (
+                        {cityCodes.length})
+                      </button>
+                      {cityChipsOpen && (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {cityCodes.map((code) => {
+                            const city = CITIES_DATA.find((c) => c.id === code);
+                            return (
+                              <span
+                                key={code}
+                                className="inline-flex items-center gap-1 rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700"
+                              >
+                                {city?.name ?? code}
+                                <button
+                                  type="button"
+                                  onClick={() => toggleCity(code)}
+                                  className="flex h-4 w-4 items-center justify-center rounded-full text-brand-500 transition hover:bg-brand-100 hover:text-brand-700"
+                                  aria-label={`Quitar ${city?.name ?? code}`}
+                                >
+                                  ×
+                                </button>
+                              </span>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
                   )}
+                </Field>
+
+                <Field label="Nomenclatura (auto-generada)" full>
+                  <div className="rounded-lg border border-brand-500/30 bg-brand-50 px-4 py-2.5 font-mono text-sm tracking-wide text-slate-900">
+                    {nomenclature}
+                  </div>
+                </Field>
+
+                <Field label="Rango de fechas" full>
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <span className="text-sm font-medium text-slate-700">Fechas</span>
+                      <label className="flex items-center gap-2 text-xs text-slate-500">
+                        <input
+                          type="checkbox"
+                          checked={isRange}
+                          onChange={(e) => setIsRange(e.target.checked)}
+                          className="h-4 w-4 accent-brand-500"
+                        />
+                        Habilitar rango (max 30 días)
+                      </label>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <div className="flex-1">
+                        <span className="mb-1 block text-xs text-slate-500">Inicio</span>
+                        <input
+                          type="date"
+                          value={startDate}
+                          onChange={(e) => setStartDate(e.target.value)}
+                          className={inputClass + " bg-white"}
+                        />
+                      </div>
+                      {isRange && (
+                        <>
+                          <span className="pt-5 text-slate-400">→</span>
+                          <div className="flex-1">
+                            <span className="mb-1 block text-xs text-slate-500">Fin</span>
+                            <input
+                              type="date"
+                              value={endDate}
+                              onChange={(e) => setEndDate(e.target.value)}
+                              className={inputClass + " bg-white"}
+                            />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </Field>
+
+                <Field label="Tipo" full>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.values(COMM_TYPES).map((t) => {
+                      const active = types.includes(t);
+                      const locked = isTypeLocked(t);
+                      return (
+                        <button
+                          key={t}
+                          type="button"
+                          onClick={() => toggleType(t)}
+                          title={locked ? "Al menos un tipo es obligatorio" : undefined}
+                          className={`rounded-lg border px-5 py-2.5 text-sm font-semibold transition ${
+                            active
+                              ? "border-brand-500 bg-brand-500 text-white shadow-sm"
+                              : "border-slate-200 bg-white text-slate-600 hover:border-brand-300"
+                          } ${locked ? "cursor-not-allowed opacity-90" : ""}`}
+                        >
+                          {t} {active && "✓"}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </Field>
 
                 <Field label={`Cohortes (${kind === "pax" ? "PAX" : "DRV"} IDs)`} full>
@@ -642,7 +681,10 @@ export default function Index() {
                 <div className="mt-6 grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {actionKeys.map((actionKey) => {
                     const isPope = types.includes(COMM_TYPES.POPE);
-                    const isRangeOnly = actionKey === "Pop Up" || actionKey === "XPanel";
+                    // Every Ad Placement channel schedules by free time range
+                    // (desde–hasta) instead of hourly slots.
+                    const isRangeOnly =
+                      ACTION_KEYS_BY_KIND[kind][COMM_TYPES.AD_PLACEMENT].includes(actionKey);
 
                     const conflictingKey = actionKey === "Push out" ? "Whatsapp" : actionKey === "Whatsapp" ? "Push out" : null;
                     const blockedDates = new Set<string>();
@@ -664,6 +706,7 @@ export default function Index() {
                         endDate={isRange ? endDate : startDate}
                         selectedSlots={slotSelection[actionKey] ?? {}}
                         onToggle={(date, slot) => toggleSlotForChannel(actionKey, date, slot)}
+                        onRangeChange={(date, range) => setRangeForChannel(actionKey, date, range)}
                         isPope={isPope}
                         isRangeOnly={isRangeOnly}
                         blockedDates={blockedDates}

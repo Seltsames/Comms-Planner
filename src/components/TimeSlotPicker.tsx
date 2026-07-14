@@ -17,6 +17,8 @@ interface TimeSlotPickerProps {
   endDate: string;
   selectedSlots: Record<string, string>;
   onToggle: (date: string, slot: string) => void;
+  /** Only for isRangeOnly channels: sets/clears the free HH:MM-HH:MM range of a date. */
+  onRangeChange?: (date: string, range: string | null) => void;
   isPope: boolean;
   isRangeOnly: boolean;
   blockedDates: Set<string>;
@@ -62,6 +64,67 @@ function getSeverityIcon(severity: string | null) {
   }
 }
 
+/**
+ * Free "desde – hasta" range picker for Ad Placement channels: no hourly
+ * slots, the user types any HH:MM boundaries (e.g. 00:00–23:59).
+ */
+function RangeDayPicker({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (range: string | null) => void;
+}) {
+  const selected = value !== null;
+  const [from, setFrom] = useState(() => value?.split("-")[0] ?? "00:00");
+  const [to, setTo] = useState(() => value?.split("-")[1] ?? "23:59");
+  const invalid = from >= to;
+
+  function update(nextFrom: string, nextTo: string) {
+    setFrom(nextFrom);
+    setTo(nextTo);
+    if (selected && nextFrom < nextTo) onChange(`${nextFrom}-${nextTo}`);
+  }
+
+  return (
+    <div className="space-y-2 p-3">
+      <div>
+        <span className="mb-0.5 block text-[10px] font-medium text-slate-500">Desde</span>
+        <input
+          type="time"
+          value={from}
+          onChange={(e) => update(e.target.value, to)}
+          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+        />
+      </div>
+      <div>
+        <span className="mb-0.5 block text-[10px] font-medium text-slate-500">Hasta</span>
+        <input
+          type="time"
+          value={to}
+          onChange={(e) => update(from, e.target.value)}
+          className="w-full rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs text-slate-700"
+        />
+      </div>
+      {invalid && (
+        <p className="text-[10px] font-medium text-red-600">"Desde" debe ser menor que "Hasta"</p>
+      )}
+      <button
+        type="button"
+        disabled={!selected && invalid}
+        onClick={() => (selected ? onChange(null) : onChange(`${from}-${to}`))}
+        className={`w-full rounded-lg border py-1.5 text-xs font-bold transition disabled:cursor-not-allowed disabled:opacity-50 ${
+          selected
+            ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600"
+            : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+        }`}
+      >
+        {selected ? `✓ ${value}` : "Seleccionar día"}
+      </button>
+    </div>
+  );
+}
+
 export function TimeSlotPicker({
   actionKey,
   country,
@@ -70,6 +133,7 @@ export function TimeSlotPicker({
   endDate,
   selectedSlots,
   onToggle,
+  onRangeChange,
   isPope,
   isRangeOnly,
   blockedDates,
@@ -219,22 +283,24 @@ export function TimeSlotPicker({
 
       {isOpen && (
         <>
-          <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
-            <div className="flex flex-wrap gap-3 sm:gap-4">
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-emerald-50 border border-emerald-300" /> Disponible
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-amber-50 border border-amber-300" /> Bajo riesgo
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-slate-100 border border-slate-200" /> No disponible
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-sm bg-orange-500" /> Seleccionado
-              </span>
+          {!isRangeOnly && (
+            <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex flex-wrap gap-3 sm:gap-4">
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-emerald-50 border border-emerald-300" /> Disponible
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-amber-50 border border-amber-300" /> Bajo riesgo
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-slate-100 border border-slate-200" /> No disponible
+                </span>
+                <span className="flex items-center gap-1.5">
+                  <span className="w-3 h-3 rounded-sm bg-orange-500" /> Seleccionado
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="p-4 sm:p-5">
             {loadingSlots && (
@@ -281,6 +347,11 @@ export function TimeSlotPicker({
                             {dayLock?.reason ?? "Otro canal ya tiene este día ocupado."}
                           </p>
                         </div>
+                      ) : isRangeOnly ? (
+                        <RangeDayPicker
+                          value={selectedSlots[makeKey(date, "RANGE")] ?? null}
+                          onChange={(range) => onRangeChange?.(date, range)}
+                        />
                       ) : (
                         <div className="p-2 max-h-[320px] overflow-y-auto space-y-0.5">
                           {!isRangeOnly && !isPope && (
