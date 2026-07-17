@@ -9,10 +9,15 @@ import {
 } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
+import { buildNomenclature } from "@/lib/nomenclature";
 import { EventIdInput } from "@/components/EventIdInput";
 
-function csvEscape(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+const WEEKDAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
+const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+
+function formatDayHeader(dateStr: string): string {
+  const d = new Date(dateStr + "T12:00:00");
+  return `${WEEKDAYS[d.getDay()]} ${d.getDate()} ${MONTHS[d.getMonth()]}`;
 }
 
 export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
@@ -35,58 +40,76 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
   }, [campaigns]);
 
   /**
-   * Download the approved campaign's calendar as CSV: one row per
-   * scheduled comm (channel + date + time). The Plan ID column is filled
-   * only on push rows — it is the push approval code.
+   * Download the approved campaign calendar as XLSX in calendar layout:
+   * one row per channel, one column per approved day (weekday + date),
+   * with the approved hours in each cell. Titled with the campaign
+   * nomenclature; the push approval Plan ID is shown when the campaign
+   * includes push channels.
    */
   async function handleDownload(campaign: {
     id: string;
     name: string;
+    team: string;
+    sub_team: string | null;
     country: string;
     plan_id: string | null;
   }) {
     setDownloadingId(campaign.id);
     try {
       const all = await fetchCampaignSchedules(kind);
-      const rows = (all ?? [])
-        .filter((s) => s.campaign_id === campaign.id)
-        .sort(
-          (a, b) =>
-            a.schedule_date.localeCompare(b.schedule_date) ||
-            a.time_slot.localeCompare(b.time_slot) ||
-            a.action_key.localeCompare(b.action_key),
-        );
+      const rows = (all ?? []).filter((s) => s.campaign_id === campaign.id);
       if (rows.length === 0) {
         alert("Esta campaña no tiene comunicaciones programadas.");
         return;
       }
+
+      const nomenclature = buildNomenclature(
+        kind,
+        campaign.country,
+        campaign.team,
+        campaign.sub_team,
+        campaign.name,
+      );
+
+      // Calendar grid: channels as rows, approved days as columns, hours in
+      // the cells.
+      const dates = [...new Set(rows.map((s) => s.schedule_date))].sort();
+      const channels = [...new Set(rows.map((s) => s.action_key))].sort();
+      const hoursByCell = new Map<string, string[]>();
+      for (const s of rows) {
+        const key = `${s.action_key}|${s.schedule_date}`;
+        const list = hoursByCell.get(key) ?? [];
+        list.push(s.time_slot);
+        hoursByCell.set(key, list);
+      }
+
+      const header = ["Canal", ...dates.map(formatDayHeader)];
       const isPush = (actionKey: string) => actionKey.toLowerCase().includes("push");
-      const lines = [
-        "sep=,",
-        "Campaña,País,Canal,Fecha,Horario,Plan ID",
-        ...rows.map((s) =>
-          [
-            campaign.name,
-            campaign.country,
-            s.action_key,
-            s.schedule_date,
-            s.time_slot,
-            isPush(s.action_key) ? (campaign.plan_id ?? "") : "",
-          ]
-            .map(csvEscape)
-            .join(","),
-        ),
+      const hasPush = channels.some(isPush);
+
+      const aoa: string[][] = [
+        [nomenclature],
+        ...(hasPush ? [[`Plan ID (push): ${campaign.plan_id ?? "—"}`]] : []),
+        [],
+        header,
+        ...channels.map((ch) => [
+          ch,
+          ...dates.map((d) => (hoursByCell.get(`${ch}|${d}`) ?? []).sort().join(", ")),
+        ]),
       ];
-      // BOM so Excel opens it with the right encoding.
-      const blob = new Blob(["\uFEFF" + lines.join("\n")], {
-        type: "text/csv;charset=utf-8",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `calendario_${campaign.name.replace(/[^\p{L}\p{N}]+/gu, "_")}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
+
+      const XLSX = await import("xlsx");
+      const ws = XLSX.utils.aoa_to_sheet(aoa);
+      // Title (and Plan ID line) span the whole grid width.
+      const lastCol = header.length - 1;
+      ws["!merges"] = [
+        { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
+        ...(hasPush ? [{ s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } }] : []),
+      ];
+      ws["!cols"] = [{ wch: 22 }, ...dates.map(() => ({ wch: 16 }))];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Calendario");
+      XLSX.writeFile(wb, `calendario_${nomenclature}.xlsx`);
     } catch (e: unknown) {
       const msg =
         typeof e === "object" && e !== null && "message" in e
@@ -189,6 +212,8 @@ interface CampaignCardProps {
   onDownload: (campaign: {
     id: string;
     name: string;
+    team: string;
+    sub_team: string | null;
     country: string;
     plan_id: string | null;
   }) => void;
