@@ -31,3 +31,6 @@ dist-ssr
 # Misc
 *.local
 coverage
+
+# Local MCP config (no commitear)
+.mcp.json
