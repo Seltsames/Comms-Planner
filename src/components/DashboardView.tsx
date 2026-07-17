@@ -5,15 +5,16 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchAllCampaigns,
   fetchCampaignSchedules,
+  fetchAudienceCounts,
   type AnalyticsAggregates,
 } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
   Calendar, AlertTriangle, CheckCircle, FileText, Target, Users,
-  Download, X, ChevronLeft, ChevronRight, Megaphone, List,
+  Download, X, ChevronLeft, ChevronRight, Megaphone, List, Clock,
 } from "lucide-react";
 import AnalyticsView from "./AnalyticsView";
-import { formatDateShort, formatDateWithWeekday } from "@/lib/format";
+import { formatDateShort, formatDateWithWeekday, formatNumber } from "@/lib/format";
 import { getChannelColor } from "@/lib/channelStyles";
 
 const TIME_SLOTS_30M: string[] = [];
@@ -34,6 +35,7 @@ function shortName(fullName: string) {
 
 interface ScheduleItem {
   id: string;
+  campaignId: string;
   name: string;
   team: string;
   subTeam: string | null;
@@ -67,6 +69,12 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
   const [calendarViewAll, setCalendarViewAll] = useState(false);
   const [calendarSubTab, setCalendarSubTab] = useState<"pope" | "ad">("pope");
   const [inspectorConflict, setInspectorConflict] = useState<ConflictDetail | null>(null);
+  // Slot clicked on the calendar: shows every comm scheduled at that hour.
+  const [slotInspector, setSlotInspector] = useState<{
+    date: string;
+    time: string;
+    camps: ScheduleItem[];
+  } | null>(null);
 
   const [filterChannel, setFilterChannel] = useState<string>("all");
   const [filterHourFrom, setFilterHourFrom] = useState<string>("all");
@@ -109,6 +117,34 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
 
   const totalDriversCount = aggregates?.kpis.total_drivers ?? 0;
 
+  // Distinct audience ids per campaign (server-side aggregate).
+  const { data: audienceCounts } = useAutoRefresh(
+    () => fetchAudienceCounts(kind).catch(() => ({}) as Record<string, number>),
+    60_000,
+    [kind],
+  );
+
+  // Creator names. RLS: admins can read every profile; normal users only
+  // their own — unknown creators fall back to "—" in the slot inspector.
+  const { data: profiles } = useAutoRefresh(
+    async () => {
+      const { data } = await supabase
+        .from("profiles")
+        .select("user_id, email, full_name");
+      return (data ?? []) as Array<{ user_id: string; email: string; full_name: string | null }>;
+    },
+    60_000,
+    [],
+  );
+
+  const profileById = useMemo(() => {
+    const map = new Map<string, { email: string; full_name: string | null }>();
+    for (const p of profiles ?? []) {
+      map.set(p.user_id, { email: p.email, full_name: p.full_name });
+    }
+    return map;
+  }, [profiles]);
+
   const scheduleItems = useMemo((): ScheduleItem[] => {
     if (!rawCampaigns || !rawSchedules) return [];
     const items: ScheduleItem[] = [];
@@ -118,6 +154,7 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
       for (const sched of campSchedules) {
         items.push({
           id: sched.id,
+          campaignId: camp.id,
           name: camp.name,
           team: camp.team,
           subTeam: camp.sub_team,
@@ -282,6 +319,7 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
       return (
         <td key={date + time} className="border-l border-slate-100 p-0.5 h-11 align-top">
           <button
+            onClick={() => setSlotInspector({ date, time, camps })}
             className={`w-full text-left rounded px-1.5 py-1 border text-[10px] leading-tight truncate cursor-pointer hover:shadow transition block ${cc.bg} ${cc.border} ${cc.text}`}
           >
             <span className="font-bold block truncate">{shortName(camps[0].name)}</span>
@@ -300,6 +338,7 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
     return (
       <td key={date + time} className="border-l border-slate-100 p-0.5 h-11 align-top">
         <button
+          onClick={() => setSlotInspector({ date, time, camps })}
           className={`w-full text-left rounded px-1.5 py-1 border text-[10px] leading-tight cursor-pointer hover:shadow transition block ${cc.bg} ${cc.border} ${cc.text}`}
         >
           <span className="font-bold">{camps.length} comms</span>
@@ -605,6 +644,86 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
 
       {activeTab === "analytics" && isAdmin && (
         <AnalyticsView kind={kind} />
+      )}
+
+      {slotInspector && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4"
+          onClick={() => setSlotInspector(null)}
+        >
+          <div
+            className="bg-white rounded-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden shadow-2xl"
+            onClick={e => e.stopPropagation()}
+          >
+            <div className="p-6 border-b border-slate-200 flex justify-between items-center bg-slate-50">
+              <div>
+                <h2 className="text-xl font-bold text-slate-800 flex items-center gap-2">
+                  <Clock size={20} className="text-brand-500" />
+                  Comunicaciones programadas
+                </h2>
+                <p className="text-sm text-slate-500 mt-0.5">
+                  {formatDateShort(slotInspector.date)} ·{" "}
+                  {slotInspector.time === "FULL_DAY" ? "Día completo" : slotInspector.time} ·{" "}
+                  {slotInspector.camps.length} comm{slotInspector.camps.length !== 1 ? "s" : ""}
+                </p>
+              </div>
+              <button
+                onClick={() => setSlotInspector(null)}
+                className="p-2 hover:bg-slate-200 rounded-full"
+              >
+                <X size={24} className="text-slate-400" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto space-y-3">
+              {slotInspector.camps.map(c => {
+                const cc = getChannelColor(c.actionKey);
+                const prof = profileById.get(c.creatorId);
+                const username = prof
+                  ? (prof.full_name ?? prof.email.split("@")[0])
+                  : "—";
+                const count = audienceCounts?.[c.campaignId];
+                return (
+                  <div key={c.id} className="p-4 rounded-xl border border-slate-200 bg-slate-50">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${cc.dot}`} />
+                        <span className="font-bold text-slate-800 truncate" title={c.name}>
+                          {shortName(c.name)}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full border shrink-0 ${cc.bg} ${cc.border} ${cc.text}`}>
+                          {c.actionKey}
+                        </span>
+                      </div>
+                      <span className="text-xs font-mono text-slate-500 shrink-0">
+                        {c.timeSlot === "FULL_DAY" ? "Día completo" : c.timeSlot}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-3 gap-3 mt-3 text-sm">
+                      <div>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">Usuario</p>
+                        <p className="font-medium text-slate-700 truncate" title={prof?.email}>
+                          {username}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">País</p>
+                        <p className="font-medium text-slate-700">{c.country}</p>
+                      </div>
+                      <div>
+                        <p className="text-[10px] text-slate-500 uppercase font-bold">
+                          {kind === "pax" ? "Pasajeros impactados" : "Conductores impactados"}
+                        </p>
+                        <p className="font-medium text-slate-700">
+                          {count !== undefined ? formatNumber(count) : "—"}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
       )}
 
       {inspectorConflict && (
