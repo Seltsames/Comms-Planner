@@ -791,6 +791,9 @@ export default function Index() {
           onClose={() => {
             setSavedCampaign(null);
             resetBuilder();
+            // Land the user on the Dashboard tab after a successful save so
+            // they immediately see their campaign in context.
+            setActiveTab("dashboard");
             setTimeout(() => setSaveSuccess(false), 4000);
           }}
         />
