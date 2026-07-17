@@ -10,10 +10,12 @@ import {
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { buildNomenclature } from "@/lib/nomenclature";
+import { ACTION_KEYS_BY_KIND, COMM_TYPES } from "@/lib/constants";
 import { EventIdInput } from "@/components/EventIdInput";
 
-const WEEKDAYS = ["Dom", "Lun", "Mar", "Mié", "Jue", "Vie", "Sáb"];
-const MONTHS = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
+// Day headers in the calendar export follow the ops template: "Fri 17 jul".
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 function formatDayHeader(dateStr: string): string {
   const d = new Date(dateStr + "T12:00:00");
@@ -71,10 +73,27 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
         campaign.name,
       );
 
-      // Calendar grid: channels as rows, approved days as columns, hours in
-      // the cells.
+      // Calendar grid following the ops template:
+      //   Campaign name | <nomenclatura>
+      //   User          | <usuario>
+      //
+      //                 |          |         | Calendar (merged over dates)
+      //   Platform      | Channel  | Plan ID | Fri 17 jul | Sat 18 jul | ...
+      //   Pope          | Push ... | 12345   | 13:00      | ...
+      //   Ad placement  | Pop Up   |         | 00:00-23:59| ...
       const dates = [...new Set(rows.map((s) => s.schedule_date))].sort();
-      const channels = [...new Set(rows.map((s) => s.action_key))].sort();
+      const popeChannels: readonly string[] = ACTION_KEYS_BY_KIND[kind][COMM_TYPES.POPE];
+      const adChannels: readonly string[] = ACTION_KEYS_BY_KIND[kind][COMM_TYPES.AD_PLACEMENT];
+      const canonicalOrder = [...popeChannels, ...adChannels];
+      const channels = [...new Set(rows.map((s) => s.action_key))].sort((a, b) => {
+        const ia = canonicalOrder.indexOf(a);
+        const ib = canonicalOrder.indexOf(b);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib) || a.localeCompare(b);
+      });
+      const platformOf = (ch: string) =>
+        popeChannels.includes(ch) ? "Pope" : adChannels.includes(ch) ? "Ad placement" : "";
+      const isPush = (actionKey: string) => actionKey.toLowerCase().includes("push");
+
       const hoursByCell = new Map<string, string[]>();
       for (const s of rows) {
         const key = `${s.action_key}|${s.schedule_date}`;
@@ -83,30 +102,34 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
         hoursByCell.set(key, list);
       }
 
-      const header = ["Canal", ...dates.map(formatDayHeader)];
-      const isPush = (actionKey: string) => actionKey.toLowerCase().includes("push");
-      const hasPush = channels.some(isPush);
-
+      const username = user?.email?.split("@")[0] ?? "";
       const aoa: string[][] = [
-        [nomenclature],
-        ...(hasPush ? [[`Plan ID (push): ${campaign.plan_id ?? "—"}`]] : []),
+        ["Campaign name", nomenclature],
+        ["User", username],
         [],
-        header,
+        ["", "", "", "Calendar"],
+        ["Platform", "Channel", "Plan ID", ...dates.map(formatDayHeader)],
         ...channels.map((ch) => [
+          platformOf(ch),
           ch,
+          isPush(ch) ? (campaign.plan_id ?? "") : "",
           ...dates.map((d) => (hoursByCell.get(`${ch}|${d}`) ?? []).sort().join(", ")),
         ]),
       ];
 
       const XLSX = await import("xlsx");
       const ws = XLSX.utils.aoa_to_sheet(aoa);
-      // Title (and Plan ID line) span the whole grid width.
-      const lastCol = header.length - 1;
       ws["!merges"] = [
-        { s: { r: 0, c: 0 }, e: { r: 0, c: lastCol } },
-        ...(hasPush ? [{ s: { r: 1, c: 0 }, e: { r: 1, c: lastCol } }] : []),
+        // User value spans B2:C2; "Calendar" spans the date columns (D4...).
+        { s: { r: 1, c: 1 }, e: { r: 1, c: 2 } },
+        { s: { r: 3, c: 3 }, e: { r: 3, c: 3 + dates.length - 1 } },
       ];
-      ws["!cols"] = [{ wch: 22 }, ...dates.map(() => ({ wch: 16 }))];
+      ws["!cols"] = [
+        { wch: 15 },
+        { wch: 12 },
+        { wch: 14 },
+        ...dates.map(() => ({ wch: 12 })),
+      ];
       const wb = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(wb, ws, "Calendario");
       XLSX.writeFile(wb, `calendario_${nomenclature}.xlsx`);
