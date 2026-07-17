@@ -15,10 +15,9 @@ import {
   type CohortState,
 } from "@/features/cohorts/CohortUploader";
 import { CohortConflictPreview } from "@/features/cohorts/CohortConflictPreview";
-import { saveCampaignRpc, fetchCampaignById } from "@/lib/queries";
+import { saveCampaignRpc } from "@/lib/queries";
 import { TimeSlotPicker } from "@/components/TimeSlotPicker";
 import { ScheduledCommsPreview, type ScheduledComm } from "@/components/ScheduledCommsPreview";
-import { SaveSuccessModal } from "@/components/SaveSuccessModal";
 import { ConflictsSummary, type ChannelConflicts } from "@/components/ConflictsSummary";
 import DashboardView from "@/components/DashboardView";
 import { useAuth } from "@/lib/auth";
@@ -36,12 +35,6 @@ export default function Index() {
 
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
-  const [savedCampaign, setSavedCampaign] = useState<{
-    id: string;
-    status: string;
-    name: string;
-  } | null>(null);
 
   const [citiesOpen, setCitiesOpen] = useState(false);
   const [cityChipsOpen, setCityChipsOpen] = useState(false);
@@ -281,7 +274,6 @@ export default function Index() {
     if (!user?.id) return;
     setSaveLoading(true);
     setSaveError(null);
-    setSaveSuccess(false);
     try {
       const campaignId = await saveCampaignRpc(
         {
@@ -301,11 +293,11 @@ export default function Index() {
         },
         kind,
       );
-      const saved = await fetchCampaignById(campaignId, kind);
-      if (saved) {
-        setSavedCampaign({ id: saved.id, status: saved.status, name: saved.name });
-      }
-      setSaveSuccess(true);
+      void campaignId;
+      // No success modal: reset the builder and land directly on the
+      // Dashboard so the user sees their campaign in context.
+      resetBuilder();
+      setActiveTab("dashboard");
     } catch (e: unknown) {
       // Supabase errors are plain objects (PostgrestError), not Error
       // instances — read .message from either shape so the real cause
@@ -324,7 +316,6 @@ export default function Index() {
     reset();
     setChannelConflicts({});
     setSaveError(null);
-    setSaveSuccess(false);
   }
 
   return (
@@ -750,18 +741,11 @@ export default function Index() {
                   {saveError}
                 </p>
               )}
-              {saveSuccess && (
-                <p className="mt-3 rounded-lg border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 font-semibold">
-                  ✓ Campaña guardada correctamente
-                </p>
-              )}
-
               <div className="mt-6 flex justify-between">
                 <button
                   onClick={() => {
                     setStep(1);
                     setSaveError(null);
-                    setSaveSuccess(false);
                   }}
                   className="text-sm font-semibold text-slate-500 hover:text-slate-700"
                 >
@@ -782,22 +766,6 @@ export default function Index() {
         <DashboardView kind={kind} />
       )}
 
-      {savedCampaign && (
-        <SaveSuccessModal
-          campaignId={savedCampaign.id}
-          campaignStatus={savedCampaign.status}
-          campaignName={savedCampaign.name}
-          scheduledComms={scheduledComms}
-          onClose={() => {
-            setSavedCampaign(null);
-            resetBuilder();
-            // Land the user on the Dashboard tab after a successful save so
-            // they immediately see their campaign in context.
-            setActiveTab("dashboard");
-            setTimeout(() => setSaveSuccess(false), 4000);
-          }}
-        />
-      )}
     </div>
   );
 }
