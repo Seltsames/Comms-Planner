@@ -16,6 +16,7 @@ import {
 } from "@/features/cohorts/CohortUploader";
 import { CohortConflictPreview } from "@/features/cohorts/CohortConflictPreview";
 import { saveCampaignRpc } from "@/lib/queries";
+import { buildNomenclature } from "@/lib/nomenclature";
 import { TimeSlotPicker } from "@/components/TimeSlotPicker";
 import { ScheduledCommsPreview, type ScheduledComm } from "@/components/ScheduledCommsPreview";
 import { ConflictsSummary, type ChannelConflicts } from "@/components/ConflictsSummary";
@@ -75,19 +76,10 @@ export default function Index() {
     [cohort, cityCodes],
   );
 
-  const nomenclature = useMemo(() => {
-    const parts = [kind === "pax" ? "PAX MKT" : "DRV MKT"];
-    if (country) parts.push(country);
-    if (team) parts.push(team);
-    if (subTeam) parts.push(subTeam);
-    if (name) parts.push(name);
-    // Auto-generated names: uppercase, spaces → underscores, collapsed.
-    return parts
-      .join("_")
-      .toUpperCase()
-      .replace(/\s+/g, "_")
-      .replace(/_+/g, "_");
-  }, [kind, country, team, subTeam, name]);
+  const nomenclature = useMemo(
+    () => buildNomenclature(kind, country, team, subTeam, name),
+    [kind, country, team, subTeam, name],
+  );
 
   const countryCities = useMemo(
     () => CITIES_DATA.filter((c) => c.country === country),
