@@ -26,6 +26,8 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // User whose "Habilitar" button is showing the platform picker.
+  const [enablePickerFor, setEnablePickerFor] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -120,6 +122,27 @@ export default function AdminUsers() {
     const action = u.is_enabled ? "disable" : "enable";
     const res = await callAdminFn(action, u.user_id);
     if (!res.ok) setError(res.error);
+    await load();
+    await refreshUser();
+    setBusyId(null);
+  }
+
+  /**
+   * Enable a new user with the platform access the admin picked (Driver,
+   * PAX or both). Sets the access first so the user never lands enabled
+   * with the wrong platforms.
+   */
+  async function enableWithPlatforms(u: AdminUserRow, platforms: Platform[]) {
+    setBusyId(u.user_id);
+    setError(null);
+    const accessRes = await callAdminFn("set_platform_access", u.user_id, platforms);
+    if (!accessRes.ok) {
+      setError(accessRes.error);
+    } else {
+      const enableRes = await callAdminFn("enable", u.user_id);
+      if (!enableRes.ok) setError(enableRes.error);
+    }
+    setEnablePickerFor(null);
     await load();
     await refreshUser();
     setBusyId(null);
@@ -267,18 +290,64 @@ export default function AdminUsers() {
                       </td>
                       <td className="py-3 pr-4">
                         <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => toggleEnabled(u)}
-                            disabled={isBusy}
-                            className={`rounded-lg border px-3 py-1.5 text-xs font-semibold transition disabled:opacity-50 ${
-                              u.is_enabled
-                                ? "border-amber-200 bg-amber-50 text-amber-700 hover:border-amber-300"
-                                : "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
-                            }`}
-                          >
-                            {u.is_enabled ? "Deshabilitar" : "Habilitar"}
-                          </button>
+                          {u.is_enabled ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleEnabled(u)}
+                              disabled={isBusy}
+                              className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs font-semibold text-amber-700 transition hover:border-amber-300 disabled:opacity-50"
+                            >
+                              Deshabilitar
+                            </button>
+                          ) : enablePickerFor === u.user_id ? (
+                            <div className="flex items-center gap-1">
+                              <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                Acceso:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => enableWithPlatforms(u, ["drv"])}
+                                disabled={isBusy}
+                                className="rounded-lg border border-sky-200 bg-sky-50 px-2.5 py-1.5 text-xs font-semibold text-sky-700 transition hover:border-sky-300 disabled:opacity-50"
+                              >
+                                Driver
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => enableWithPlatforms(u, ["pax"])}
+                                disabled={isBusy}
+                                className="rounded-lg border border-violet-200 bg-violet-50 px-2.5 py-1.5 text-xs font-semibold text-violet-700 transition hover:border-violet-300 disabled:opacity-50"
+                              >
+                                PAX
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => enableWithPlatforms(u, ["drv", "pax"])}
+                                disabled={isBusy}
+                                className="rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 disabled:opacity-50"
+                              >
+                                Ambas
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEnablePickerFor(null)}
+                                disabled={isBusy}
+                                aria-label="Cancelar"
+                                className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-xs font-semibold text-slate-500 transition hover:border-slate-300 disabled:opacity-50"
+                              >
+                                ×
+                              </button>
+                            </div>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setEnablePickerFor(u.user_id)}
+                              disabled={isBusy}
+                              className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-semibold text-emerald-700 transition hover:border-emerald-300 disabled:opacity-50"
+                            >
+                              Habilitar…
+                            </button>
+                          )}
                           <button
                             type="button"
                             onClick={() => toggleAdmin(u)}
