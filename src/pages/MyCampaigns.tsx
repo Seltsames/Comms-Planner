@@ -1,15 +1,25 @@
 import { useState, useMemo } from "react";
 import { Card, PageHeader } from "@/components/Ui";
 import { useAuth, type AudienceKind } from "@/lib/auth";
-import { fetchUserCampaigns, cancelCampaignRpc, setCampaignEventIdRpc } from "@/lib/queries";
+import {
+  fetchUserCampaigns,
+  fetchCampaignSchedules,
+  cancelCampaignRpc,
+  setCampaignEventIdRpc,
+} from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { EventIdInput } from "@/components/EventIdInput";
+
+function csvEscape(value: string): string {
+  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
+}
 
 export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
   const { user } = useAuth();
   const userId = user?.id ?? "";
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
     () => (userId ? fetchUserCampaigns(userId, kind) : Promise.resolve(null)),
@@ -23,6 +33,70 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [campaigns]);
+
+  /**
+   * Download the approved campaign's calendar as CSV: one row per
+   * scheduled comm (channel + date + time). The Plan ID column is filled
+   * only on push rows — it is the push approval code.
+   */
+  async function handleDownload(campaign: {
+    id: string;
+    name: string;
+    country: string;
+    plan_id: string | null;
+  }) {
+    setDownloadingId(campaign.id);
+    try {
+      const all = await fetchCampaignSchedules(kind);
+      const rows = (all ?? [])
+        .filter((s) => s.campaign_id === campaign.id)
+        .sort(
+          (a, b) =>
+            a.schedule_date.localeCompare(b.schedule_date) ||
+            a.time_slot.localeCompare(b.time_slot) ||
+            a.action_key.localeCompare(b.action_key),
+        );
+      if (rows.length === 0) {
+        alert("Esta campaña no tiene comunicaciones programadas.");
+        return;
+      }
+      const isPush = (actionKey: string) => actionKey.toLowerCase().includes("push");
+      const lines = [
+        "sep=,",
+        "Campaña,País,Canal,Fecha,Horario,Plan ID",
+        ...rows.map((s) =>
+          [
+            campaign.name,
+            campaign.country,
+            s.action_key,
+            s.schedule_date,
+            s.time_slot,
+            isPush(s.action_key) ? (campaign.plan_id ?? "") : "",
+          ]
+            .map(csvEscape)
+            .join(","),
+        ),
+      ];
+      // BOM so Excel opens it with the right encoding.
+      const blob = new Blob(["\uFEFF" + lines.join("\n")], {
+        type: "text/csv;charset=utf-8",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `calendario_${campaign.name.replace(/[^\p{L}\p{N}]+/gu, "_")}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: unknown) {
+      const msg =
+        typeof e === "object" && e !== null && "message" in e
+          ? String((e as { message: unknown }).message)
+          : "Error descargando el calendario";
+      alert(msg);
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   async function handleCancel(campaignId: string) {
     if (!confirm("¿Cancelar esta campaña? Esta acción no se puede deshacer.")) return;
@@ -76,6 +150,8 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
                 campaign={campaign}
                 onCancel={handleCancel}
                 cancellingId={cancellingId}
+                onDownload={handleDownload}
+                downloadingId={downloadingId}
                 onSaveEventId={async (eventId) => {
                   await setCampaignEventIdRpc(campaign.id, kind, eventId);
                   await refresh();
@@ -104,15 +180,30 @@ interface CampaignCardProps {
     action_keys: string[];
     csv_file_name: string | null;
     event_id: string | null;
+    plan_id: string | null;
     created_at: string;
     updated_at: string;
   };
   onCancel: (id: string) => void;
   cancellingId: string | null;
+  onDownload: (campaign: {
+    id: string;
+    name: string;
+    country: string;
+    plan_id: string | null;
+  }) => void;
+  downloadingId: string | null;
   onSaveEventId: (eventId: string) => Promise<void>;
 }
 
-function CampaignCard({ campaign, onCancel, cancellingId, onSaveEventId }: CampaignCardProps) {
+function CampaignCard({
+  campaign,
+  onCancel,
+  cancellingId,
+  onDownload,
+  downloadingId,
+  onSaveEventId,
+}: CampaignCardProps) {
   const start = new Date(campaign.start_date + "T12:00:00");
   const end = new Date(campaign.end_date + "T12:00:00");
   const dateRange =
@@ -128,6 +219,15 @@ function CampaignCard({ campaign, onCancel, cancellingId, onSaveEventId }: Campa
           <EventIdInput value={campaign.event_id} onSave={onSaveEventId} />
         </div>
         <div className="flex items-center gap-2">
+          {campaign.status === "approved" && (
+            <button
+              onClick={() => onDownload(campaign)}
+              disabled={downloadingId === campaign.id}
+              className="rounded border border-brand-200 bg-brand-50 px-2 py-1 text-xs font-semibold text-brand-700 transition hover:border-brand-300 disabled:opacity-50"
+            >
+              {downloadingId === campaign.id ? "Descargando…" : "⬇ Descargar calendario"}
+            </button>
+          )}
           {campaign.status !== "cancelled" && (
             <button
               onClick={() => onCancel(campaign.id)}
