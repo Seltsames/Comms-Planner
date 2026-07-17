@@ -124,23 +124,32 @@ export async function fetchAllCampaignsBoth(): Promise<AdminCampaignRow[]> {
 }
 
 /**
- * Distinct audience ids per campaign (server-side aggregate — the client
- * never downloads the raw campaign_audience rows). Returns a map keyed by
- * `${kind}-${campaign_id}` so DRV and PAX rows never collide.
+ * Distinct audience ids per campaign of one side (server-side aggregate —
+ * the client never downloads the raw campaign_audience rows). Returns a
+ * map keyed by campaign_id.
+ */
+export async function fetchAudienceCounts(kind: AudienceKind): Promise<Record<string, number>> {
+  const { data, error } = await supabase.rpc(`get_campaign_audience_counts_${kind}`);
+  if (error) throw error;
+  const map: Record<string, number> = {};
+  for (const row of (data ?? []) as Array<{ campaign_id: string; audience_count: number }>) {
+    map[row.campaign_id] = Number(row.audience_count);
+  }
+  return map;
+}
+
+/**
+ * Audience counts for BOTH sides, keyed by `${kind}-${campaign_id}` so
+ * DRV and PAX rows never collide (admin campaigns table).
  */
 export async function fetchAudienceCountsBoth(): Promise<Record<string, number>> {
-  const fetchKind = async (kind: AudienceKind) => {
-    const { data, error } = await supabase.rpc(`get_campaign_audience_counts_${kind}`);
-    if (error) throw error;
-    return (data ?? []) as Array<{ campaign_id: string; audience_count: number }>;
-  };
   const [drv, pax] = await Promise.all([
-    fetchKind("drv").catch(() => []),
-    fetchKind("pax").catch(() => []),
+    fetchAudienceCounts("drv").catch(() => ({}) as Record<string, number>),
+    fetchAudienceCounts("pax").catch(() => ({}) as Record<string, number>),
   ]);
   const map: Record<string, number> = {};
-  for (const row of drv) map[`drv-${row.campaign_id}`] = Number(row.audience_count);
-  for (const row of pax) map[`pax-${row.campaign_id}`] = Number(row.audience_count);
+  for (const [id, n] of Object.entries(drv)) map[`drv-${id}`] = n;
+  for (const [id, n] of Object.entries(pax)) map[`pax-${id}`] = n;
   return map;
 }
 
