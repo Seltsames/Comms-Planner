@@ -192,12 +192,23 @@ export default function Index() {
 
   function buildAudience() {
     const audience: Array<{ id: string; city_code: string | null }> = [];
+    // General-cohort rows carry city_code=null and are city-independent, so
+    // they must be added ONCE — not once per selected city. The old loop
+    // duplicated the whole general cohort for every city without its own
+    // CSV (N cities x M ids), producing payloads of hundreds of MB that
+    // the API gateway killed after ~50s (HTTP 520).
+    let generalAdded = false;
     for (const code of cityCodes) {
       const perCity = cohort.byCity[code];
-      const source = perCity ?? cohort.general;
-      if (!source) continue;
-      for (const drvId of source.validIds) {
-        audience.push({ id: drvId, city_code: perCity ? code : null });
+      if (perCity) {
+        for (const id of perCity.validIds) {
+          audience.push({ id, city_code: code });
+        }
+      } else if (cohort.general && !generalAdded) {
+        for (const id of cohort.general.validIds) {
+          audience.push({ id, city_code: null });
+        }
+        generalAdded = true;
       }
     }
     return audience;
