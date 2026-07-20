@@ -12,7 +12,7 @@ import { EventIdInput } from "@/components/EventIdInput";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
-import type { AudienceKind } from "@/lib/auth";
+import { useAuth, type AudienceKind } from "@/lib/auth";
 
 interface ProfileLookup {
   email: string | null;
@@ -27,6 +27,9 @@ function hasPushChannel(actionKeys: string[]): boolean {
 }
 
 export default function AdminCampaigns() {
+  // Platform-scoped admin: only the sides in platformAccess are shown
+  // and manageable (the RPCs enforce the same scope server-side).
+  const { platformAccess } = useAuth();
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
@@ -69,22 +72,26 @@ export default function AdminCampaigns() {
     return map;
   }, [profiles]);
 
+  const scopedCampaigns = useMemo(
+    () => (campaigns ?? []).filter((c) => platformAccess.includes(c.kind)),
+    [campaigns, platformAccess],
+  );
+
   const visibleCampaigns = useMemo(() => {
-    if (!campaigns) return [];
     const filtered =
       kindFilter === "all"
-        ? campaigns
-        : campaigns.filter((c) => c.kind === kindFilter);
+        ? scopedCampaigns
+        : scopedCampaigns.filter((c) => c.kind === kindFilter);
     return [...filtered].sort(
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
-  }, [campaigns, kindFilter]);
+  }, [scopedCampaigns, kindFilter]);
 
   const counts = useMemo(() => {
     const c = { drv: 0, pax: 0 };
-    for (const row of campaigns ?? []) c[row.kind]++;
+    for (const row of scopedCampaigns) c[row.kind]++;
     return c;
-  }, [campaigns]);
+  }, [scopedCampaigns]);
 
   async function handleApprove(id: string, kind: AudienceKind, actionKeys: string[]) {
     const rowKey = `${kind}-${id}`;
@@ -145,29 +152,35 @@ export default function AdminCampaigns() {
           <span className="text-xs text-slate-500">
             {loading && <span className="animate-pulse">Actualizando…</span>}
             {!loading && campaigns && (
-              <span>{formatNumber(campaigns.length)} campañas</span>
+              <span>{formatNumber(scopedCampaigns.length)} campañas</span>
             )}
           </span>
         }
       />
 
-      {/* Filter chips */}
+      {/* Filter chips — only the platforms this admin manages */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
-        <FilterChip
-          active={kindFilter === "all"}
-          onClick={() => setKindFilter("all")}
-          label={`Todas · ${formatNumber((campaigns ?? []).length)}`}
-        />
-        <FilterChip
-          active={kindFilter === "drv"}
-          onClick={() => setKindFilter("drv")}
-          label={`Conductores · ${formatNumber(counts.drv)}`}
-        />
-        <FilterChip
-          active={kindFilter === "pax"}
-          onClick={() => setKindFilter("pax")}
-          label={`Pasajeros · ${formatNumber(counts.pax)}`}
-        />
+        {platformAccess.length > 1 && (
+          <FilterChip
+            active={kindFilter === "all"}
+            onClick={() => setKindFilter("all")}
+            label={`Todas · ${formatNumber(scopedCampaigns.length)}`}
+          />
+        )}
+        {platformAccess.includes("drv") && (
+          <FilterChip
+            active={kindFilter === "drv"}
+            onClick={() => setKindFilter("drv")}
+            label={`Conductores · ${formatNumber(counts.drv)}`}
+          />
+        )}
+        {platformAccess.includes("pax") && (
+          <FilterChip
+            active={kindFilter === "pax"}
+            onClick={() => setKindFilter("pax")}
+            label={`Pasajeros · ${formatNumber(counts.pax)}`}
+          />
+        )}
       </div>
 
       {error && (

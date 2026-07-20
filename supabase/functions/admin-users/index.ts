@@ -107,10 +107,13 @@ Deno.serve(async (req: Request) => {
     }
   }
 
-  // Refuse to disable yourself
-  if (targetUserId === callerId && (action === "disable" || action === "revoke_admin")) {
+  // Refuse to disable yourself or change your own platform scope
+  if (
+    targetUserId === callerId &&
+    (action === "disable" || action === "revoke_admin" || action === "set_platform_access")
+  ) {
     return json(
-      { error: "No puedes deshabilitarte o quitarte el rol de admin a ti mismo" },
+      { error: "No puedes cambiar tu propio acceso: pídelo a otro administrador" },
       400,
     );
   }

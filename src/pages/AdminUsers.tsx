@@ -251,9 +251,8 @@ export default function AdminUsers() {
                         )}
                       </td>
                       <td className="py-3 pr-4">
-                        {u.role === "admin" ? (
-                          <span className="text-xs text-slate-500">Todas (admin)</span>
-                        ) : (
+                        {/* Chips apply to admins too: they define the admin's
+                            platform scope (drv-only / pax-only / both). */}
                           <div className="flex gap-1">
                             {PLATFORMS.map((p) => {
                               const active = u.platform_access.includes(p);
@@ -279,7 +278,6 @@ export default function AdminUsers() {
                               );
                             })}
                           </div>
-                        )}
                       </td>
                       <td className="py-3 pr-4 text-xs text-slate-500">
                         {new Date(u.created_at).toLocaleDateString("es-MX", {

@@ -101,13 +101,11 @@ async function fetchAuthUser(sessionUser: User): Promise<AuthUser> {
     fullName,
     role,
     isEnabled: profile?.is_enabled ?? false,
-    // Admins manage both sides, so they always get full access.
-    platformAccess:
-      role === "admin"
-        ? [...AUDIENCE_KINDS]
-        : sanitizePlatformAccess(
-            (profile as { platform_access?: unknown } | null)?.platform_access,
-          ),
+    // Platform access applies to admins too: an admin's scope is their
+    // role intersected with platform_access (drv-only / pax-only / both).
+    platformAccess: sanitizePlatformAccess(
+      (profile as { platform_access?: unknown } | null)?.platform_access,
+    ),
   };
 }
 
