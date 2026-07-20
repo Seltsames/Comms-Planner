@@ -16,6 +16,7 @@ import {
 import AnalyticsView from "./AnalyticsView";
 import { formatDateShort, formatDateWithWeekday, formatNumber } from "@/lib/format";
 import { getChannelColor } from "@/lib/channelStyles";
+import { ACTION_KEYS_BY_KIND, COMM_TYPES } from "@/lib/constants";
 
 const TIME_SLOTS_30M: string[] = [];
 for (let h = 7; h < 22; h++) {
@@ -23,11 +24,8 @@ for (let h = 7; h < 22; h++) {
   TIME_SLOTS_30M.push(`${String(h).padStart(2, "0")}:30`);
 }
 
-const POPE_CHANNELS = ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"];
-const AD_CHANNELS = ["Pop Up", "XPanel"];
-
 function shortName(fullName: string) {
-  if (!fullName.startsWith("DRV MKT_")) return fullName;
+  if (!fullName.startsWith("DRV MKT_") && !fullName.startsWith("PAX MKT_")) return fullName;
   const parts = fullName.split("_");
   if (parts.length <= 4) return parts[parts.length - 1];
   return parts.slice(4).join("_");
@@ -63,6 +61,11 @@ interface ConflictDetail {
 export default function DashboardView({ kind }: { kind: AudienceKind }) {
   const { user, role } = useAuth();
   const isAdmin = role === "admin";
+
+  // Channel classification is per platform: the PAX side has its own Ad
+  // Placement channel set, so the calendar never mixes sides.
+  const popeChannels: readonly string[] = ACTION_KEYS_BY_KIND[kind][COMM_TYPES.POPE];
+  const adChannels: readonly string[] = ACTION_KEYS_BY_KIND[kind][COMM_TYPES.AD_PLACEMENT];
 
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [calendarWeekOffset, setCalendarWeekOffset] = useState(0);
@@ -222,9 +225,9 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
 
   const filteredBySubTab = useMemo(() => {
     return filteredItems.filter(c =>
-      calendarSubTab === "pope" ? POPE_CHANNELS.includes(c.actionKey) : AD_CHANNELS.includes(c.actionKey),
+      calendarSubTab === "pope" ? popeChannels.includes(c.actionKey) : adChannels.includes(c.actionKey),
     );
-  }, [filteredItems, calendarSubTab]);
+  }, [filteredItems, calendarSubTab, popeChannels, adChannels]);
 
   const dayStats = useMemo(() => {
     const stats: Record<string, { items: ScheduleItem[] }> = {};
@@ -381,7 +384,7 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
           <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
             <KpiCard title="Programadas" value={scheduleItems.length} icon={<FileText size={24} className="text-blue-500" />} sub="Comunicaciones totales" />
             <KpiCard title="Aprobadas" value={approvedCount} icon={<CheckCircle size={24} className="text-green-500" />} sub="Auto + manual" />
-            <KpiCard title="Conductores" value={totalDriversCount.toLocaleString()} icon={<Users size={24} className="text-brand-500" />} sub="Únicos impactados" />
+            <KpiCard title={kind === "pax" ? "Pasajeros" : "Conductores"} value={totalDriversCount.toLocaleString()} icon={<Users size={24} className="text-brand-500" />} sub="Únicos impactados" />
             <KpiCard title="Riesgo moderado" value={yellowConflicts} icon={<AlertTriangle size={24} className="text-amber-500" />} sub="Amarillo (<30%)" isWarning={yellowConflicts > 0} />
             <KpiCard title="Conflicto crítico" value={redConflicts} icon={<AlertTriangle size={24} className="text-red-500" />} sub="Rojo (>50%)" isDanger={redConflicts > 0} />
           </div>
@@ -565,33 +568,14 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                   Ad Placement
                 </button>
               </div>
-              {calendarSubTab === "pope" ? (
-                <div className="ml-4 flex items-center gap-3 text-[10px] text-slate-500">
-                  {[
-                    { key: "Whatsapp", label: "Whatsapp", color: "bg-emerald-500" },
-                    { key: "Push in/out", label: "Push", color: "bg-amber-400" },
-                    { key: "Email", label: "Email", color: "bg-pink-500" },
-                    { key: "SMS", label: "SMS", color: "bg-slate-400" },
-                  ].map(l => (
-                    <div key={l.key} className="flex items-center gap-1">
-                      <span className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                      <span>{l.label}</span>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="ml-4 flex items-center gap-3 text-[10px] text-slate-500">
-                  {[
-                    { key: "Pop Up", label: "Pop up", color: "bg-blue-500" },
-                    { key: "XPanel", label: "XPanel", color: "bg-purple-500" },
-                  ].map(l => (
-                    <div key={l.key} className="flex items-center gap-1">
-                      <span className={`w-2.5 h-2.5 rounded-sm ${l.color}`} />
-                      <span>{l.label}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div className="ml-4 flex flex-wrap items-center gap-3 text-[10px] text-slate-500">
+                {(calendarSubTab === "pope" ? popeChannels : adChannels).map(ch => (
+                  <div key={ch} className="flex items-center gap-1">
+                    <span className={`w-2.5 h-2.5 rounded-sm ${getChannelColor(ch).dot}`} />
+                    <span>{ch}</span>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="overflow-x-auto">
