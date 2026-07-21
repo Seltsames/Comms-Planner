@@ -21,6 +21,7 @@ export const CHANNEL_COLORS: Record<string, ChannelStyle> = {
   "Push in/out":   { bg: "bg-amber-400/15",   border: "border-amber-400/30",   text: "text-amber-600",   dot: "bg-amber-400",   hex: "#fbbf24" },
   "Push in":       { bg: "bg-amber-400/15",   border: "border-amber-400/30",   text: "text-amber-600",   dot: "bg-amber-400",   hex: "#fbbf24" },
   "Push out":      { bg: "bg-amber-400/15",   border: "border-amber-400/30",   text: "text-amber-600",   dot: "bg-amber-400",   hex: "#fbbf24" },
+  "Push trigger":  { bg: "bg-orange-500/15",  border: "border-orange-500/30",  text: "text-orange-600",  dot: "bg-orange-500",  hex: "#f97316" },
   Email:           { bg: "bg-pink-500/15",    border: "border-pink-500/30",    text: "text-pink-600",    dot: "bg-pink-500",    hex: "#ec4899" },
   SMS:             { bg: "bg-slate-100",      border: "border-slate-200",      text: "text-slate-600",   dot: "bg-slate-400",   hex: "#94a3b8" },
 };

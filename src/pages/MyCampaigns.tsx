@@ -113,7 +113,12 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
           platformOf(ch),
           ch,
           isPush(ch) ? (campaign.plan_id ?? "") : "",
-          ...dates.map((d) => (hoursByCell.get(`${ch}|${d}`) ?? []).sort().join(", ")),
+          ...dates.map((d) =>
+            (hoursByCell.get(`${ch}|${d}`) ?? [])
+              .sort()
+              .map((t) => (t === "TRIGGER" ? "Trigger" : t))
+              .join(", "),
+          ),
         ]),
       ];
 

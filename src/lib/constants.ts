@@ -46,7 +46,13 @@ export const COMM_TYPES = {
 export type CommType = (typeof COMM_TYPES)[keyof typeof COMM_TYPES];
 
 // POPE channels are shared by both audiences; Ad Placement diverges per side.
-const POPE_CHANNELS = ["Push in/out", "Push in", "Push out", "Email", "Whatsapp", "SMS"];
+// "Push trigger" is event-driven (fires when the user performs an action),
+// so it schedules by DAY only — no time slot. Its schedules store the
+// sentinel time_slot value "TRIGGER".
+const POPE_CHANNELS = ["Push in/out", "Push in", "Push out", "Push trigger", "Email", "Whatsapp", "SMS"];
+
+export const TRIGGER_CHANNEL = "Push trigger";
+export const TRIGGER_TIME_SLOT = "TRIGGER";
 
 export const ACTION_KEYS_BY_KIND: Record<"drv" | "pax", Record<CommType, string[]>> = {
   drv: {
