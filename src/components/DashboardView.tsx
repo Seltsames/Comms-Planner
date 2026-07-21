@@ -24,6 +24,10 @@ for (let h = 7; h < 22; h++) {
   TIME_SLOTS_30M.push(`${String(h).padStart(2, "0")}:30`);
 }
 
+// Slots treated as "all day" for Ad Placement grouping (00:00-23:59 is the
+// range picker's default = whole day).
+const FULL_DAY_SLOTS = new Set(["FULL_DAY", "07:00-22:00", "06:00-22:00", "00:00-23:59"]);
+
 function shortName(fullName: string) {
   if (!fullName.startsWith("DRV MKT_") && !fullName.startsWith("PAX MKT_")) return fullName;
   const parts = fullName.split("_");
@@ -310,11 +314,21 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
   const getCampsAtSlot = (date: string, time: string) =>
     filteredBySubTab.filter(c => c.scheduleDate === date && c.timeSlot === time);
 
-  const getFullDayCamps = (date: string) =>
-    filteredBySubTab.filter(c =>
-      c.scheduleDate === date &&
-      (c.timeSlot === "FULL_DAY" || c.timeSlot === "07:00-22:00" || c.timeSlot === "06:00-22:00"),
-    );
+  // Ad Placement comms schedule by time RANGE ("10:00-16:00", "00:00-23:59")
+  // or a full-day marker — not by the hourly grid. Show one row per distinct
+  // range actually present, full-day markers first. This is why range-based
+  // Ad Placement comms were previously invisible on the calendar.
+  const adRanges = useMemo(() => {
+    if (calendarSubTab !== "ad") return [];
+    const set = new Set<string>();
+    filteredBySubTab.forEach(c => set.add(c.timeSlot));
+    return Array.from(set).sort((a, b) => {
+      const fa = FULL_DAY_SLOTS.has(a) ? 0 : 1;
+      const fb = FULL_DAY_SLOTS.has(b) ? 0 : 1;
+      return fa - fb || a.localeCompare(b);
+    });
+  }, [filteredBySubTab, calendarSubTab]);
+  const rangeRowLabel = (slot: string) => (FULL_DAY_SLOTS.has(slot) ? "Día completo" : slot);
 
   // Push trigger comms are day-only (no time slot) — they get their own row.
   const getTriggerCamps = (date: string) =>
@@ -591,7 +605,7 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                 </colgroup>
                 <thead>
                   <tr className="border-b border-slate-200">
-                    <th className="p-2 text-xs font-bold text-slate-500 text-center bg-slate-50 border-r border-slate-200">Hora</th>
+                    <th className="p-2 text-xs font-bold text-slate-500 text-center bg-slate-50 border-r border-slate-200">{calendarSubTab === "ad" ? "Rango" : "Hora"}</th>
                     {calendarDates.map(date => {
                       const isSelected = date === selectedDate;
                       return (
@@ -604,36 +618,51 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                   </tr>
                 </thead>
                 <tbody>
-                  {calendarSubTab === "pope" && hasTriggerComms && (
-                    <tr className="border-b border-slate-100 bg-orange-50/30">
-                      <td className="p-1 text-[10px] font-bold text-orange-600 text-center bg-orange-50 border-r border-slate-200 h-11 align-middle uppercase whitespace-nowrap">Trigger</td>
-                      {calendarDates.map(date => {
-                        const camps = getTriggerCamps(date);
-                        if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
-                        return renderCell(date, "TRIGGER", camps);
-                      })}
-                    </tr>
+                  {calendarSubTab === "ad" ? (
+                    adRanges.length === 0 ? (
+                      <tr>
+                        <td colSpan={calendarDates.length + 1} className="p-8 text-center text-xs text-slate-400">
+                          No hay comunicaciones de Ad Placement en este período
+                        </td>
+                      </tr>
+                    ) : (
+                      adRanges.map(range => (
+                        <tr key={range} className="border-b border-slate-100 bg-blue-50/20">
+                          <td className="p-1 text-[10px] font-bold text-blue-600 text-center bg-blue-50 border-r border-slate-200 h-11 align-middle whitespace-nowrap">
+                            {rangeRowLabel(range)}
+                          </td>
+                          {calendarDates.map(date => {
+                            const camps = getCampsAtSlot(date, range);
+                            if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
+                            return renderCell(date, range, camps);
+                          })}
+                        </tr>
+                      ))
+                    )
+                  ) : (
+                    <>
+                      {hasTriggerComms && (
+                        <tr className="border-b border-slate-100 bg-orange-50/30">
+                          <td className="p-1 text-[10px] font-bold text-orange-600 text-center bg-orange-50 border-r border-slate-200 h-11 align-middle uppercase whitespace-nowrap">Trigger</td>
+                          {calendarDates.map(date => {
+                            const camps = getTriggerCamps(date);
+                            if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
+                            return renderCell(date, "TRIGGER", camps);
+                          })}
+                        </tr>
+                      )}
+                      {filteredTimeSlots.map(time => (
+                        <tr key={time} className="border-b border-slate-100/50">
+                          <td className="p-1 text-xs font-mono text-slate-400 text-center bg-slate-50 border-r border-slate-200 h-11 align-middle">{time}</td>
+                          {calendarDates.map(date => {
+                            const camps = getCampsAtSlot(date, time);
+                            if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
+                            return renderCell(date, time, camps);
+                          })}
+                        </tr>
+                      ))}
+                    </>
                   )}
-                  {calendarSubTab === "ad" && (
-                    <tr className="border-b border-slate-100 bg-blue-50/30">
-                      <td className="p-1 text-[10px] font-bold text-blue-600 text-center bg-blue-50 border-r border-slate-200 h-11 align-middle uppercase whitespace-nowrap">Día completo</td>
-                      {calendarDates.map(date => {
-                        const camps = getFullDayCamps(date);
-                        if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
-                        return renderCell(date, "FULL_DAY", camps);
-                      })}
-                    </tr>
-                  )}
-                  {filteredTimeSlots.map(time => (
-                    <tr key={time} className="border-b border-slate-100/50">
-                      <td className="p-1 text-xs font-mono text-slate-400 text-center bg-slate-50 border-r border-slate-200 h-11 align-middle">{time}</td>
-                      {calendarDates.map(date => {
-                        const camps = getCampsAtSlot(date, time);
-                        if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
-                        return renderCell(date, time, camps);
-                      })}
-                    </tr>
-                  ))}
                 </tbody>
               </table>
             </div>
