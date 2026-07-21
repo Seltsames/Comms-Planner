@@ -316,6 +316,11 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
       (c.timeSlot === "FULL_DAY" || c.timeSlot === "07:00-22:00" || c.timeSlot === "06:00-22:00"),
     );
 
+  // Push trigger comms are day-only (no time slot) — they get their own row.
+  const getTriggerCamps = (date: string) =>
+    filteredBySubTab.filter(c => c.scheduleDate === date && c.timeSlot === "TRIGGER");
+  const hasTriggerComms = filteredBySubTab.some(c => c.timeSlot === "TRIGGER");
+
   function renderCell(date: string, time: string, camps: ScheduleItem[]) {
     if (camps.length === 1) {
       const cc = getChannelColor(camps[0].actionKey);
@@ -599,6 +604,16 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                   </tr>
                 </thead>
                 <tbody>
+                  {calendarSubTab === "pope" && hasTriggerComms && (
+                    <tr className="border-b border-slate-100 bg-orange-50/30">
+                      <td className="p-1 text-[10px] font-bold text-orange-600 text-center bg-orange-50 border-r border-slate-200 h-11 align-middle uppercase whitespace-nowrap">Trigger</td>
+                      {calendarDates.map(date => {
+                        const camps = getTriggerCamps(date);
+                        if (camps.length === 0) return <td key={date} className="border-l border-slate-100 h-11" />;
+                        return renderCell(date, "TRIGGER", camps);
+                      })}
+                    </tr>
+                  )}
                   {calendarSubTab === "ad" && (
                     <tr className="border-b border-slate-100 bg-blue-50/30">
                       <td className="p-1 text-[10px] font-bold text-blue-600 text-center bg-blue-50 border-r border-slate-200 h-11 align-middle uppercase whitespace-nowrap">Día completo</td>
@@ -647,7 +662,11 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                 </h2>
                 <p className="text-sm text-slate-500 mt-0.5">
                   {formatDateShort(slotInspector.date)} ·{" "}
-                  {slotInspector.time === "FULL_DAY" ? "Día completo" : slotInspector.time} ·{" "}
+                  {slotInspector.time === "FULL_DAY"
+                    ? "Día completo"
+                    : slotInspector.time === "TRIGGER"
+                      ? "Trigger (al cumplir función)"
+                      : slotInspector.time} ·{" "}
                   {slotInspector.camps.length} comm{slotInspector.camps.length !== 1 ? "s" : ""}
                 </p>
               </div>
@@ -679,7 +698,11 @@ export default function DashboardView({ kind }: { kind: AudienceKind }) {
                         </span>
                       </div>
                       <span className="text-xs font-mono text-slate-500 shrink-0">
-                        {c.timeSlot === "FULL_DAY" ? "Día completo" : c.timeSlot}
+                        {c.timeSlot === "FULL_DAY"
+                          ? "Día completo"
+                          : c.timeSlot === "TRIGGER"
+                            ? "Trigger"
+                            : c.timeSlot}
                       </span>
                     </div>
                     <div className="grid grid-cols-3 gap-3 mt-3 text-sm">

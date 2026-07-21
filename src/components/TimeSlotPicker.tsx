@@ -21,6 +21,8 @@ interface TimeSlotPickerProps {
   onRangeChange?: (date: string, range: string | null) => void;
   isPope: boolean;
   isRangeOnly: boolean;
+  /** Event-driven channels (Push trigger): schedule by day only, no time. */
+  isTriggerOnly?: boolean;
   blockedDates: Set<string>;
   audienceIds: string[];
   kind: AudienceKind;
@@ -136,6 +138,7 @@ export function TimeSlotPicker({
   onRangeChange,
   isPope,
   isRangeOnly,
+  isTriggerOnly = false,
   blockedDates,
   audienceIds,
   kind,
@@ -258,11 +261,13 @@ export function TimeSlotPicker({
           <div className="text-left min-w-0">
             <h4 className="font-bold text-slate-800 text-sm truncate">{actionKey}</h4>
             <p className="text-xs text-slate-500 truncate">
-              {isRangeOnly
-                ? "Ad Placement · Rango de horas"
-                : isPope
-                  ? "POPE · 1 horario por día"
-                  : "Ad Placement · Múltiples horarios"}
+              {isTriggerOnly
+                ? "POPE · Se envía al cumplir la función — elige solo los días"
+                : isRangeOnly
+                  ? "Ad Placement · Rango de horas"
+                  : isPope
+                    ? "POPE · 1 horario por día"
+                    : "Ad Placement · Múltiples horarios"}
             </p>
           </div>
         </div>
@@ -283,7 +288,7 @@ export function TimeSlotPicker({
 
       {isOpen && (
         <>
-          {!isRangeOnly && (
+          {!isRangeOnly && !isTriggerOnly && (
             <div className="px-4 sm:px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
               <div className="flex flex-wrap gap-3 sm:gap-4">
                 <span className="flex items-center gap-1.5">
@@ -346,6 +351,23 @@ export function TimeSlotPicker({
                           <p className="text-[10px] text-slate-500 leading-tight">
                             {dayLock?.reason ?? "Otro canal ya tiene este día ocupado."}
                           </p>
+                        </div>
+                      ) : isTriggerOnly ? (
+                        <div className="p-3">
+                          <p className="mb-2 text-center text-[10px] leading-tight text-slate-500">
+                            Sin horario: se envía cuando el usuario cumple la función
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => onToggle(date, "TRIGGER")}
+                            className={`w-full rounded-lg border py-2 text-xs font-bold transition ${
+                              isSelected(date, "TRIGGER")
+                                ? "border-orange-500 bg-orange-500 text-white hover:bg-orange-600"
+                                : "border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                            }`}
+                          >
+                            {isSelected(date, "TRIGGER") ? "✓ Programado este día" : "Seleccionar día"}
+                          </button>
                         </div>
                       ) : isRangeOnly ? (
                         <RangeDayPicker

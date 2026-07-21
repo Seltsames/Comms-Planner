@@ -3,6 +3,7 @@ import { Card, PageHeader } from "@/components/Ui";
 import {
   ACTION_KEYS_BY_KIND,
   COMM_TYPES,
+  TRIGGER_CHANNEL,
   CITIES_DATA,
   COUNTRIES,
   TEAMS_BY_KIND,
@@ -245,7 +246,14 @@ export default function Index() {
     for (const [actionKey, slots] of Object.entries(slotSelection)) {
       for (const [key, timeVal] of Object.entries(slots)) {
         const [date, time] = key.split("|");
-        const finalTime = time === "FULL_DAY" ? "07:00-22:00" : time === "RANGE" ? (timeVal as string) : time;
+        const finalTime =
+          time === "FULL_DAY"
+            ? "07:00-22:00"
+            : time === "RANGE"
+              ? (timeVal as string)
+              : time === "TRIGGER"
+                ? "Trigger (al cumplir función)"
+                : time;
         items.push({
           id: `${actionKey}|${date}|${time}`,
           name: nomenclature,
@@ -679,6 +687,8 @@ export default function Index() {
                     // (desde–hasta) instead of hourly slots.
                     const isRangeOnly =
                       ACTION_KEYS_BY_KIND[kind][COMM_TYPES.AD_PLACEMENT].includes(actionKey);
+                    // Push trigger is event-driven: day-only scheduling.
+                    const isTriggerOnly = actionKey === TRIGGER_CHANNEL;
 
                     const conflictingKey = actionKey === "Push out" ? "Whatsapp" : actionKey === "Whatsapp" ? "Push out" : null;
                     const blockedDates = new Set<string>();
@@ -703,6 +713,7 @@ export default function Index() {
                         onRangeChange={(date, range) => setRangeForChannel(actionKey, date, range)}
                         isPope={isPope}
                         isRangeOnly={isRangeOnly}
+                        isTriggerOnly={isTriggerOnly}
                         blockedDates={blockedDates}
                         audienceIds={effectiveDrvIds}
                         kind={kind}
