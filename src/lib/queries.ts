@@ -159,7 +159,11 @@ export interface CampaignMetricRow {
   channel: string;
   comm_platform: string;
   country_code: string;
-  start_date: string | null;
+  /** Range covered by the aggregated report rows. */
+  first_date: string | null;
+  last_date: string | null;
+  /** How many raw report rows were rolled up into this one. */
+  report_rows: number;
   request_uv: number | null;
   send_uv: number | null;
   deliver_uv: number | null;
@@ -175,9 +179,11 @@ export interface CampaignMetricRow {
 }
 
 /**
- * Performance metrics (CTR / CTOR) ingested from the governance Sheet,
- * with the CommsPlanner campaign resolved via its Event IDs. Admin-only
- * per platform (enforced by the RPC).
+ * Performance metrics aggregated per campaign + channel (the report
+ * splits a campaign across many step/template/date rows), with the
+ * CommsPlanner campaign resolved via its Event IDs. Rates come from the
+ * summed counters using each channel's own formula. Admin-only per
+ * platform (enforced by the RPC).
  */
 export async function fetchCampaignMetrics(kind: AudienceKind): Promise<CampaignMetricRow[]> {
   const { data, error } = await supabase.rpc("get_campaign_metrics", { p_kind: kind });
