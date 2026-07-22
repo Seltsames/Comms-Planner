@@ -346,36 +346,44 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }
 
-  // Performance rows honouring the country filter, newest first. CTR/CTOR
-  // are recomputed from the raw counters when present so they stay right
-  // after aggregation; otherwise the Sheet's own rate is shown.
+  // Already aggregated per campaign + channel by the RPC, which also
+  // computes each rate with that channel's own formula. Newest first.
   const perfRows = useMemo(() => {
-    const rows = (metrics ?? []).filter(
-      m => countryFilter === "all" || m.country_code === countryFilter,
-    );
-    return rows
-      .map(m => {
-        const ctr =
-          m.deliver_uv && m.click_uv !== null
-            ? (m.click_uv / m.deliver_uv) * 100
-            : m.ctr;
-        const ctor =
-          m.show_uv && m.click_uv !== null ? (m.click_uv / m.show_uv) * 100 : m.ctor;
-        return { ...m, ctrCalc: ctr, ctorCalc: ctor };
-      })
-      .sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? ""));
+    return (metrics ?? [])
+      .filter(m => countryFilter === "all" || m.country_code === countryFilter)
+      .sort((a, b) => (b.last_date ?? "").localeCompare(a.last_date ?? ""));
   }, [metrics, countryFilter]);
 
   const perfSummary = useMemo(() => {
-    const clicks = perfRows.reduce((s, r) => s + (r.click_uv ?? 0), 0);
-    const delivered = perfRows.reduce((s, r) => s + (r.deliver_uv ?? 0), 0);
-    const opened = perfRows.reduce((s, r) => s + (r.show_uv ?? 0), 0);
-    const linked = perfRows.filter(r => r.campaign_id).length;
+    // CTR/CTOR are averaged per channel: push and WhatsApp/Mail use
+    // different formulas, so a single cross-channel rate would be
+    // meaningless. Each channel's rate is weighted by its volume.
+    const byChannel = new Map<string, { req: number; arr: number; show: number; click: number }>();
+    for (const r of perfRows) {
+      const acc = byChannel.get(r.channel) ?? { req: 0, arr: 0, show: 0, click: 0 };
+      acc.req += r.request_uv ?? 0;
+      acc.arr += r.arrive_uv ?? 0;
+      acc.show += r.show_uv ?? 0;
+      acc.click += r.click_uv ?? 0;
+      byChannel.set(r.channel, acc);
+    }
+    const showBased = (ch: string) => ["WHATSAPP", "MAIL"].includes(ch.toUpperCase());
+    const channels = [...byChannel.entries()]
+      .map(([channel, a]) => ({
+        channel,
+        ctr: showBased(channel)
+          ? (a.req > 0 ? (a.show / a.req) * 100 : null)
+          : (a.req > 0 ? (a.click / a.req) * 100 : null),
+        ctor: showBased(channel)
+          ? (a.arr > 0 ? (a.show / a.arr) * 100 : null)
+          : (a.show > 0 ? (a.click / a.show) * 100 : null),
+      }))
+      .sort((a, b) => a.channel.localeCompare(b.channel));
+
     return {
       rows: perfRows.length,
-      linked,
-      ctr: delivered > 0 ? (clicks / delivered) * 100 : null,
-      ctor: opened > 0 ? (clicks / opened) * 100 : null,
+      linked: perfRows.filter(r => r.campaign_id).length,
+      channels,
       lastSync: perfRows.reduce<string | null>(
         (acc, r) => (acc && acc > r.synced_at ? acc : r.synced_at),
         null,
@@ -423,15 +431,15 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
             <Target size={18} className="text-brand-500" />
             Rendimiento · CTR / CTOR
           </h3>
-          <div className="flex items-center gap-4 text-xs text-slate-500">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             {perfSummary.rows > 0 && (
               <>
-                <span>
-                  CTR global <b className="text-slate-700">{pct(perfSummary.ctr)}</b>
-                </span>
-                <span>
-                  CTOR global <b className="text-slate-700">{pct(perfSummary.ctor)}</b>
-                </span>
+                {perfSummary.channels.map(c => (
+                  <span key={c.channel} title={`Promedio ponderado de ${c.channel}`}>
+                    {c.channel}: CTR <b className="text-slate-700">{pct(c.ctr)}</b> · CTOR{" "}
+                    <b className="text-slate-700">{pct(c.ctor)}</b>
+                  </span>
+                ))}
                 <span>
                   {perfSummary.linked}/{perfSummary.rows} vinculadas
                 </span>
@@ -464,9 +472,10 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
                   <th className="px-4 py-2">Campaña</th>
                   <th className="px-4 py-2">Canal</th>
                   <th className="px-4 py-2">País</th>
-                  <th className="px-4 py-2">Fecha</th>
-                  <th className="px-4 py-2 text-right">Entregados</th>
-                  <th className="px-4 py-2 text-right">Aperturas</th>
+                  <th className="px-4 py-2">Periodo</th>
+                  <th className="px-4 py-2 text-right">Request</th>
+                  <th className="px-4 py-2 text-right">Arrive</th>
+                  <th className="px-4 py-2 text-right">Show</th>
                   <th className="px-4 py-2 text-right">Clics</th>
                   <th className="px-4 py-2 text-right">CTR</th>
                   <th className="px-4 py-2 text-right">CTOR</th>
@@ -475,14 +484,23 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
               <tbody className="divide-y divide-slate-100">
                 {perfRows.map((r, i) => {
                   const cc = getChannelColor(r.channel);
+                  const period =
+                    r.first_date && r.last_date && r.first_date !== r.last_date
+                      ? `${r.first_date} → ${r.last_date}`
+                      : (r.first_date ?? "—");
                   return (
-                    <tr key={`${r.external_campaign_id}-${r.channel}-${r.start_date}-${i}`} className="hover:bg-slate-50">
+                    <tr key={`${r.external_campaign_id}-${r.channel}-${i}`} className="hover:bg-slate-50">
                       <td className="px-4 py-2">
                         <div className="font-medium text-slate-800">
                           {r.campaign_name ?? r.activity_name ?? r.external_campaign_id}
                         </div>
                         <div className="text-[11px] text-slate-400">
                           ID {r.external_campaign_id}
+                          {r.report_rows > 1 && (
+                            <span className="ml-1" title="Filas del reporte combinadas (distintos step/template/fecha)">
+                              · {r.report_rows} envíos
+                            </span>
+                          )}
                           {!r.campaign_id && (
                             <span className="ml-1 text-amber-600">· sin vincular</span>
                           )}
@@ -494,9 +512,12 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
                         </span>
                       </td>
                       <td className="px-4 py-2 text-slate-600">{r.country_code}</td>
-                      <td className="px-4 py-2 text-slate-500">{r.start_date ?? "—"}</td>
+                      <td className="px-4 py-2 whitespace-nowrap text-slate-500">{period}</td>
                       <td className="px-4 py-2 text-right text-slate-600">
-                        {r.deliver_uv !== null ? formatNumber(r.deliver_uv) : "—"}
+                        {r.request_uv !== null ? formatNumber(r.request_uv) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {r.arrive_uv !== null ? formatNumber(r.arrive_uv) : "—"}
                       </td>
                       <td className="px-4 py-2 text-right text-slate-600">
                         {r.show_uv !== null ? formatNumber(r.show_uv) : "—"}
@@ -504,8 +525,8 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
                       <td className="px-4 py-2 text-right text-slate-600">
                         {r.click_uv !== null ? formatNumber(r.click_uv) : "—"}
                       </td>
-                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctrCalc)}</td>
-                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctorCalc)}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctr)}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctor)}</td>
                     </tr>
                   );
                 })}
