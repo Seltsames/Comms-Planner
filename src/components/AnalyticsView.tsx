@@ -4,8 +4,10 @@ import { supabase } from "@/lib/supabase";
 import {
   fetchAllCampaigns,
   fetchCampaignSchedules,
+  fetchCampaignMetrics,
   type CampaignRow,
   type AnalyticsAggregates,
+  type CampaignMetricRow,
 } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import {
@@ -116,6 +118,13 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
 
   const { data: rawSchedules } = useAutoRefresh(
     () => fetchCampaignSchedules(kind),
+    60_000,
+    [kind],
+  );
+
+  // ===== Performance metrics synced from the governance Sheet =====
+  const { data: metrics } = useAutoRefresh(
+    () => fetchCampaignMetrics(kind).catch(() => [] as CampaignMetricRow[]),
     60_000,
     [kind],
   );
@@ -337,6 +346,46 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
     document.body.appendChild(link); link.click(); document.body.removeChild(link);
   }
 
+  // Performance rows honouring the country filter, newest first. CTR/CTOR
+  // are recomputed from the raw counters when present so they stay right
+  // after aggregation; otherwise the Sheet's own rate is shown.
+  const perfRows = useMemo(() => {
+    const rows = (metrics ?? []).filter(
+      m => countryFilter === "all" || m.country_code === countryFilter,
+    );
+    return rows
+      .map(m => {
+        const ctr =
+          m.deliver_uv && m.click_uv !== null
+            ? (m.click_uv / m.deliver_uv) * 100
+            : m.ctr;
+        const ctor =
+          m.show_uv && m.click_uv !== null ? (m.click_uv / m.show_uv) * 100 : m.ctor;
+        return { ...m, ctrCalc: ctr, ctorCalc: ctor };
+      })
+      .sort((a, b) => (b.start_date ?? "").localeCompare(a.start_date ?? ""));
+  }, [metrics, countryFilter]);
+
+  const perfSummary = useMemo(() => {
+    const clicks = perfRows.reduce((s, r) => s + (r.click_uv ?? 0), 0);
+    const delivered = perfRows.reduce((s, r) => s + (r.deliver_uv ?? 0), 0);
+    const opened = perfRows.reduce((s, r) => s + (r.show_uv ?? 0), 0);
+    const linked = perfRows.filter(r => r.campaign_id).length;
+    return {
+      rows: perfRows.length,
+      linked,
+      ctr: delivered > 0 ? (clicks / delivered) * 100 : null,
+      ctor: opened > 0 ? (clicks / opened) * 100 : null,
+      lastSync: perfRows.reduce<string | null>(
+        (acc, r) => (acc && acc > r.synced_at ? acc : r.synced_at),
+        null,
+      ),
+    };
+  }, [perfRows]);
+
+  const pct = (v: number | null | undefined) =>
+    v === null || v === undefined ? "—" : `${v.toFixed(2)}%`;
+
   return (
     <div className="space-y-6">
       {/* Filters */}
@@ -364,6 +413,105 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
         )}
         {aggregatesError && (
           <span className="text-xs text-red-500 ml-auto">⚠ {aggregatesError}</span>
+        )}
+      </div>
+
+      {/* Rendimiento real (CTR / CTOR) sincronizado desde el Sheet */}
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-4">
+          <h3 className="flex items-center gap-2 font-bold text-slate-800">
+            <Target size={18} className="text-brand-500" />
+            Rendimiento · CTR / CTOR
+          </h3>
+          <div className="flex items-center gap-4 text-xs text-slate-500">
+            {perfSummary.rows > 0 && (
+              <>
+                <span>
+                  CTR global <b className="text-slate-700">{pct(perfSummary.ctr)}</b>
+                </span>
+                <span>
+                  CTOR global <b className="text-slate-700">{pct(perfSummary.ctor)}</b>
+                </span>
+                <span>
+                  {perfSummary.linked}/{perfSummary.rows} vinculadas
+                </span>
+              </>
+            )}
+            {perfSummary.lastSync && (
+              <span className="text-slate-400">
+                Sync: {new Date(perfSummary.lastSync).toLocaleDateString("es-MX", {
+                  day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
+                })}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {perfRows.length === 0 ? (
+          <div className="p-8 text-center">
+            <p className="text-sm font-semibold text-slate-600">Aún no hay métricas sincronizadas</p>
+            <p className="mx-auto mt-1 max-w-lg text-xs text-slate-400">
+              Se llenan solas desde el Google Sheet de Comms Governance. Cada fila se
+              vincula a su campaña por el <b>campaign_id</b> del reporte, que debe estar
+              cargado como <b>Event ID</b> en la campaña.
+            </p>
+          </div>
+        ) : (
+          <div className="max-h-[420px] overflow-auto">
+            <table className="min-w-full text-sm">
+              <thead className="sticky top-0 bg-slate-50 text-xs">
+                <tr className="border-b border-slate-200 text-left font-semibold text-slate-600">
+                  <th className="px-4 py-2">Campaña</th>
+                  <th className="px-4 py-2">Canal</th>
+                  <th className="px-4 py-2">País</th>
+                  <th className="px-4 py-2">Fecha</th>
+                  <th className="px-4 py-2 text-right">Entregados</th>
+                  <th className="px-4 py-2 text-right">Aperturas</th>
+                  <th className="px-4 py-2 text-right">Clics</th>
+                  <th className="px-4 py-2 text-right">CTR</th>
+                  <th className="px-4 py-2 text-right">CTOR</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {perfRows.map((r, i) => {
+                  const cc = getChannelColor(r.channel);
+                  return (
+                    <tr key={`${r.external_campaign_id}-${r.channel}-${r.start_date}-${i}`} className="hover:bg-slate-50">
+                      <td className="px-4 py-2">
+                        <div className="font-medium text-slate-800">
+                          {r.campaign_name ?? r.activity_name ?? r.external_campaign_id}
+                        </div>
+                        <div className="text-[11px] text-slate-400">
+                          ID {r.external_campaign_id}
+                          {!r.campaign_id && (
+                            <span className="ml-1 text-amber-600">· sin vincular</span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-2">
+                        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${cc.bg} ${cc.border} ${cc.text}`}>
+                          {r.channel}
+                        </span>
+                      </td>
+                      <td className="px-4 py-2 text-slate-600">{r.country_code}</td>
+                      <td className="px-4 py-2 text-slate-500">{r.start_date ?? "—"}</td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {r.deliver_uv !== null ? formatNumber(r.deliver_uv) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {r.show_uv !== null ? formatNumber(r.show_uv) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right text-slate-600">
+                        {r.click_uv !== null ? formatNumber(r.click_uv) : "—"}
+                      </td>
+                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctrCalc)}</td>
+                      <td className="px-4 py-2 text-right font-semibold text-slate-800">{pct(r.ctorCalc)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
