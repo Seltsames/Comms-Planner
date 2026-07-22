@@ -4,8 +4,10 @@
  * CÓMO INSTALARLO
  * 1. Abre el Google Sheet → Extensiones → Apps Script.
  * 2. Borra el contenido y pega TODO este archivo.
- * 3. Cambia INGEST_SECRET por el mismo valor que guardaste en Supabase
- *    (Edge Functions → Secrets → METRICS_INGEST_SECRET).
+ * 3. En INGEST_SECRET pega el VALOR del secreto que guardaste en Supabase
+ *    (Edge Functions → Secrets, en la fila METRICS_INGEST_SECRET: el valor,
+ *    no el nombre). Si no lo recuerdas, edita el secreto en Supabase con un
+ *    valor nuevo y usa ese mismo aquí.
  * 4. Guarda y ejecuta `syncMetrics` una vez: Google pedirá autorización.
  * 5. (Opcional) Para que corra solo cada día: en Apps Script → Activadores
  *    (reloj) → Añadir activador → función `syncMetrics`, origen "Basado en
@@ -21,7 +23,10 @@
 
 // ─── CONFIGURACIÓN ────────────────────────────────────────────────────────
 var ENDPOINT = 'https://fvhrvkicplaifbkvyhgj.supabase.co/functions/v1/ingest-metrics';
-var INGEST_SECRET = 'PEGA_AQUI_EL_SECRETO';   // ← igual que METRICS_INGEST_SECRET
+// ⚠️ Aquí va el VALOR del secreto (la cadena aleatoria que escribiste al
+// crearlo en Supabase), NO el nombre "METRICS_INGEST_SECRET".
+// Ejemplo de cómo se ve:  var INGEST_SECRET = 'nAiKCZyKi7MYupRxWTjBuLOZQ_ivwpjO';
+var INGEST_SECRET = 'PEGA_AQUI_EL_VALOR_DEL_SECRETO';
 var BATCH_SIZE = 500;
 // ──────────────────────────────────────────────────────────────────────────
 
