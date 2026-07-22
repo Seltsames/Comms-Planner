@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { CITIES_DATA } from "@/lib/constants";
 import { formatNumber } from "@/lib/format";
-import { getChannelColor } from "@/lib/channelStyles";
+import { getChannelColor, channelLabel } from "@/lib/channelStyles";
 
 const HOURS: number[] = Array.from({ length: 24 }, (_, i) => i);
 
@@ -87,6 +87,7 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [countryFilter, setCountryFilter] = useState<string>("all");
+  const [eventIdFilter, setEventIdFilter] = useState("");
   const [channelFilter, setChannelFilter] = useState<string>("all");
   const [showAllCampaigns, setShowAllCampaigns] = useState(false);
 
@@ -349,10 +350,21 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
   // Already aggregated per campaign + channel by the RPC, which also
   // computes each rate with that channel's own formula. Newest first.
   const perfRows = useMemo(() => {
+    const q = eventIdFilter.trim().toLowerCase();
     return (metrics ?? [])
       .filter(m => countryFilter === "all" || m.country_code === countryFilter)
+      .filter(m => {
+        if (!q) return true;
+        // Search the Event ID, and fall back to the campaign / activity
+        // name so a partial name also finds it.
+        return (
+          m.external_campaign_id.toLowerCase().includes(q) ||
+          (m.campaign_name ?? "").toLowerCase().includes(q) ||
+          (m.activity_name ?? "").toLowerCase().includes(q)
+        );
+      })
       .sort((a, b) => (b.last_date ?? "").localeCompare(a.last_date ?? ""));
-  }, [metrics, countryFilter]);
+  }, [metrics, countryFilter, eventIdFilter]);
 
   const perfSummary = useMemo(() => {
     // CTR/CTOR are averaged per channel: push and WhatsApp/Mail use
@@ -371,6 +383,8 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
     const channels = [...byChannel.entries()]
       .map(([channel, a]) => ({
         channel,
+        label: channelLabel(channel),
+        volume: a.req,
         ctr: showBased(channel)
           ? (a.req > 0 ? (a.show / a.req) * 100 : null)
           : (a.req > 0 ? (a.click / a.req) * 100 : null),
@@ -378,12 +392,30 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
           ? (a.arr > 0 ? (a.show / a.arr) * 100 : null)
           : (a.show > 0 ? (a.click / a.show) * 100 : null),
       }))
-      .sort((a, b) => a.channel.localeCompare(b.channel));
+      .sort((a, b) => b.volume - a.volume);
+
+    // General = weighted average of each channel's own rate by its volume.
+    // Channels measure CTR/CTOR differently (push counts clicks, WhatsApp
+    // counts opens), so their counters cannot simply be pooled.
+    const weighted = (pick: (c: (typeof channels)[number]) => number | null) => {
+      let num = 0;
+      let den = 0;
+      for (const c of channels) {
+        const v = pick(c);
+        if (v === null || c.volume <= 0) continue;
+        num += v * c.volume;
+        den += c.volume;
+      }
+      return den > 0 ? num / den : null;
+    };
 
     return {
       rows: perfRows.length,
       linked: perfRows.filter(r => r.campaign_id).length,
       channels,
+      generalCtr: weighted(c => c.ctr),
+      generalCtor: weighted(c => c.ctor),
+      totalVolume: channels.reduce((s, c) => s + c.volume, 0),
       lastSync: perfRows.reduce<string | null>(
         (acc, r) => (acc && acc > r.synced_at ? acc : r.synced_at),
         null,
@@ -412,8 +444,18 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
           <option value="all">Todos los canales</option>
           {filterOptions.channels.map(c => <option key={c} value={c}>{c}</option>)}
         </select>
-        {(countryFilter !== "all" || channelFilter !== "all") && (
-          <button onClick={() => { setCountryFilter("all"); setChannelFilter("all"); }}
+        <div className="relative">
+          <Search size={13} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            value={eventIdFilter}
+            onChange={e => setEventIdFilter(e.target.value)}
+            placeholder="Buscar Event ID…"
+            className="w-44 rounded-lg border border-slate-200 bg-white py-1.5 pl-7 pr-2 text-xs text-slate-700 focus:border-brand-400 focus:outline-none"
+          />
+        </div>
+        {(countryFilter !== "all" || channelFilter !== "all" || eventIdFilter !== "") && (
+          <button onClick={() => { setCountryFilter("all"); setChannelFilter("all"); setEventIdFilter(""); }}
             className="text-xs text-red-500 hover:underline font-medium">Limpiar</button>
         )}
         {aggregatesLoading && (
@@ -424,6 +466,60 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
         )}
       </div>
 
+      {/* Ponderado de métricas: general + por canal */}
+      {perfSummary.rows > 0 && (
+        <div>
+          <div className="mb-3 flex items-baseline justify-between">
+            <h3 className="flex items-center gap-2 font-bold text-slate-800">
+              <BarChart3 size={18} className="text-brand-500" />
+              Ponderado de métricas
+            </h3>
+            <span className="text-xs text-slate-400">
+              Promedio ponderado por volumen · {formatNumber(perfSummary.totalVolume)} envíos
+            </span>
+          </div>
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
+            {/* Generales */}
+            <div className="rounded-2xl border-2 border-brand-200 bg-brand-50/60 p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600">CTR general</p>
+              <p className="mt-1 text-3xl font-bold text-brand-700">{pct(perfSummary.generalCtr)}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Todos los canales</p>
+            </div>
+            <div className="rounded-2xl border-2 border-brand-200 bg-brand-50/60 p-4 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-brand-600">CTOR general</p>
+              <p className="mt-1 text-3xl font-bold text-brand-700">{pct(perfSummary.generalCtor)}</p>
+              <p className="mt-0.5 text-[10px] text-slate-500">Todos los canales</p>
+            </div>
+
+            {/* Por canal */}
+            {perfSummary.channels.map(c => {
+              const cc = getChannelColor(c.channel);
+              return (
+                <div key={c.channel} className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2.5 w-2.5 shrink-0 rounded-full ${cc.dot}`} />
+                    <p className="truncate text-[11px] font-bold text-slate-700" title={c.channel}>
+                      {c.label}
+                    </p>
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-1">
+                    <span className="text-[10px] uppercase text-slate-400">CTR</span>
+                    <span className="text-xl font-bold text-slate-800">{pct(c.ctr)}</span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-[10px] uppercase text-slate-400">CTOR</span>
+                    <span className="text-base font-semibold text-slate-600">{pct(c.ctor)}</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-slate-400">
+                    {formatNumber(c.volume)} envíos
+                  </p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Rendimiento real (CTR / CTOR) sincronizado desde el Sheet */}
       <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-slate-50/50 p-4">
@@ -433,17 +529,9 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
           </h3>
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500">
             {perfSummary.rows > 0 && (
-              <>
-                {perfSummary.channels.map(c => (
-                  <span key={c.channel} title={`Promedio ponderado de ${c.channel}`}>
-                    {c.channel}: CTR <b className="text-slate-700">{pct(c.ctr)}</b> · CTOR{" "}
-                    <b className="text-slate-700">{pct(c.ctor)}</b>
-                  </span>
-                ))}
-                <span>
-                  {perfSummary.linked}/{perfSummary.rows} vinculadas
-                </span>
-              </>
+              <span>
+                {perfSummary.rows} campaña/canal · {perfSummary.linked} vinculadas
+              </span>
             )}
             {perfSummary.lastSync && (
               <span className="text-slate-400">
@@ -507,8 +595,11 @@ export default function AnalyticsView({ kind }: { kind: AudienceKind }) {
                         </div>
                       </td>
                       <td className="px-4 py-2">
-                        <span className={`rounded-full border px-2 py-0.5 text-[11px] ${cc.bg} ${cc.border} ${cc.text}`}>
-                          {r.channel}
+                        <span
+                          title={r.channel}
+                          className={`rounded-full border px-2 py-0.5 text-[11px] ${cc.bg} ${cc.border} ${cc.text}`}
+                        >
+                          {channelLabel(r.channel)}
                         </span>
                       </td>
                       <td className="px-4 py-2 text-slate-600">{r.country_code}</td>

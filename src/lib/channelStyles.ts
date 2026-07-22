@@ -27,5 +27,18 @@ export const CHANNEL_COLORS: Record<string, ChannelStyle> = {
 };
 
 export function getChannelColor(actionKey: string): ChannelStyle {
-  return CHANNEL_COLORS[actionKey] ?? DEFAULT_CHANNEL_STYLE;
+  return CHANNEL_COLORS[actionKey] ?? CHANNEL_COLORS[channelLabel(actionKey)] ?? DEFAULT_CHANNEL_STYLE;
+}
+
+/**
+ * Friendly names for the raw channel codes that come from the POPE /
+ * Ad Placement reports. Unknown codes are shown as-is.
+ */
+const CHANNEL_LABELS: Record<string, string> = {
+  g_dri_homepage_popup: "Pop Up",
+  g_dri_homepage_xpanel_new: "XPanel",
+};
+
+export function channelLabel(rawChannel: string): string {
+  return CHANNEL_LABELS[rawChannel.trim().toLowerCase()] ?? rawChannel;
 }
