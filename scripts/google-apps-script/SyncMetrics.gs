@@ -74,6 +74,15 @@ function syncMetrics() {
     return;
   }
 
+  // El reporte puede partir un mismo envío en varias filas idénticas en
+  // campaña/step/template/canal/fecha. Se combinan aquí (sumando) antes de
+  // partir en lotes, para que las partes nunca queden en lotes distintos.
+  var beforeMerge = allRows.length;
+  allRows = mergeDuplicates_(allRows);
+  if (beforeMerge !== allRows.length) {
+    report.push('(' + (beforeMerge - allRows.length) + ' filas parciales combinadas)');
+  }
+
   var sent = 0;
   var upserted = 0;
   for (var i = 0; i < allRows.length; i += BATCH_SIZE) {
@@ -90,6 +99,43 @@ function syncMetrics() {
 
   ui_('Sincronización completa ✅\n\n' + report.join('\n') +
       '\n\nFilas enviadas: ' + sent + '\nGuardadas: ' + upserted);
+}
+
+/** Suma las filas que comparten clave y recalcula sus tasas. */
+function mergeDuplicates_(rows) {
+  var COUNTERS = ['cohort_size','request_uv','send_uv','deliver_uv','arrive_uv','show_uv','click_uv'];
+  var map = {};
+  var order = [];
+  for (var i = 0; i < rows.length; i++) {
+    var r = rows[i];
+    var key = [r.kind, r.country_code, r.external_campaign_id, r.step_id,
+               r.template_id, r.channel, r.start_date || ''].join('|');
+    if (!map[key]) { map[key] = r; order.push(key); continue; }
+    var prev = map[key];
+    for (var c = 0; c < COUNTERS.length; c++) {
+      var f = COUNTERS[c];
+      if (prev[f] === null || prev[f] === undefined) prev[f] = r[f];
+      else if (r[f] !== null && r[f] !== undefined) prev[f] = prev[f] + r[f];
+    }
+    prev.__merged = true;
+  }
+  var out = [];
+  for (var k = 0; k < order.length; k++) {
+    var row = map[order[k]];
+    if (row.__merged) {
+      row.open_rate = rate_(row.show_uv, row.deliver_uv, row.open_rate);
+      row.ctr = rate_(row.click_uv, row.deliver_uv, row.ctr);
+      row.ctor = rate_(row.click_uv, row.show_uv, row.ctor);
+      delete row.__merged;
+    }
+    out.push(row);
+  }
+  return out;
+}
+
+function rate_(part, whole, fallback) {
+  if (!whole || whole <= 0 || part === null || part === undefined) return fallback;
+  return Math.round((part / whole) * 10000) / 100;
 }
 
 /** "MX - POPE DATA" → {country:'MX', platform:'POPE'} */
