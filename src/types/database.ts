@@ -38,6 +38,7 @@ interface CampaignColumns {
   approved_at: string | null;
   plan_id: string | null;
   event_id: string | null;
+  event_ids: Json;
   created_at: string;
   updated_at: string;
   deleted_at: string | null;

@@ -6,9 +6,9 @@ import {
   approveCampaignRpc,
   rejectCampaignRpc,
   deleteCampaignHardRpc,
-  setCampaignEventIdRpc,
+  setCampaignEventIdsRpc,
 } from "@/lib/queries";
-import { EventIdInput } from "@/components/EventIdInput";
+import { EventIdsEditor, parseEventIds } from "@/components/EventIdsEditor";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
@@ -225,10 +225,12 @@ export default function AdminCampaigns() {
                     <div className="text-xs text-slate-400">{c.team}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <EventIdInput
-                      value={c.event_id}
-                      onSave={async (eventId) => {
-                        await setCampaignEventIdRpc(c.id, c.kind, eventId);
+                    <EventIdsEditor
+                      value={parseEventIds(c.event_ids, c.event_id)}
+                      types={c.types}
+                      compact
+                      onSave={async (entries) => {
+                        await setCampaignEventIdsRpc(c.id, c.kind, entries);
                         await refresh();
                       }}
                     />

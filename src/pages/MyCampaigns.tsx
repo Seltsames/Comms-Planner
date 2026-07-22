@@ -5,13 +5,13 @@ import {
   fetchUserCampaigns,
   fetchCampaignSchedules,
   cancelCampaignRpc,
-  setCampaignEventIdRpc,
+  setCampaignEventIdsRpc,
 } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { buildNomenclature } from "@/lib/nomenclature";
 import { ACTION_KEYS_BY_KIND, COMM_TYPES } from "@/lib/constants";
-import { EventIdInput } from "@/components/EventIdInput";
+import { EventIdsEditor, parseEventIds, type EventIdEntry } from "@/components/EventIdsEditor";
 
 // Day headers in the calendar export follow the ops template: "Fri 17 jul".
 const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -203,8 +203,8 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
                 cancellingId={cancellingId}
                 onDownload={handleDownload}
                 downloadingId={downloadingId}
-                onSaveEventId={async (eventId) => {
-                  await setCampaignEventIdRpc(campaign.id, kind, eventId);
+                onSaveEventIds={async (entries) => {
+                  await setCampaignEventIdsRpc(campaign.id, kind, entries);
                   await refresh();
                 }}
               />
@@ -231,6 +231,7 @@ interface CampaignCardProps {
     action_keys: string[];
     csv_file_name: string | null;
     event_id: string | null;
+    event_ids: unknown;
     plan_id: string | null;
     created_at: string;
     updated_at: string;
@@ -246,7 +247,7 @@ interface CampaignCardProps {
     plan_id: string | null;
   }) => void;
   downloadingId: string | null;
-  onSaveEventId: (eventId: string) => Promise<void>;
+  onSaveEventIds: (entries: EventIdEntry[]) => Promise<void>;
 }
 
 function CampaignCard({
@@ -255,7 +256,7 @@ function CampaignCard({
   cancellingId,
   onDownload,
   downloadingId,
-  onSaveEventId,
+  onSaveEventIds,
 }: CampaignCardProps) {
   const start = new Date(campaign.start_date + "T12:00:00");
   const end = new Date(campaign.end_date + "T12:00:00");
@@ -266,12 +267,22 @@ function CampaignCard({
 
   return (
     <Card subtitle={dateRange}>
-      <div className="mb-3 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <div className="mb-3 flex items-start justify-between gap-4">
+        <div>
           <span className="font-semibold text-slate-800">{campaign.name}</span>
-          <EventIdInput value={campaign.event_id} onSave={onSaveEventId} />
+          {/* One Event ID per comm type (Pope / Ad Placement), plus "+". */}
+          <div className="mt-2">
+            <p className="mb-1 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+              Event IDs
+            </p>
+            <EventIdsEditor
+              value={parseEventIds(campaign.event_ids, campaign.event_id)}
+              types={campaign.types}
+              onSave={onSaveEventIds}
+            />
+          </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex shrink-0 items-center gap-2">
           {campaign.status === "approved" && (
             <button
               onClick={() => onDownload(campaign)}

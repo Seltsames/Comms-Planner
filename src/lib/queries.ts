@@ -192,14 +192,14 @@ export async function approveCampaignRpc(
   if (error) throw error;
 }
 
-export async function setCampaignEventIdRpc(
+export async function setCampaignEventIdsRpc(
   campaignId: string,
   kind: AudienceKind,
-  eventId: string,
+  entries: Array<{ label: string; value: string }>,
 ): Promise<void> {
-  const { error } = await supabase.rpc(rpcName("set_campaign_event_id", kind), {
+  const { error } = await supabase.rpc(rpcName("set_campaign_event_ids", kind), {
     p_campaign_id: campaignId,
-    p_event_id: eventId,
+    p_event_ids: entries,
   });
   if (error) throw error;
 }
