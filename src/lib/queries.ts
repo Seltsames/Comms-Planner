@@ -153,6 +153,38 @@ export async function fetchAudienceCountsBoth(): Promise<Record<string, number>>
   return map;
 }
 
+export interface CampaignMetricRow {
+  external_campaign_id: string;
+  activity_name: string | null;
+  channel: string;
+  comm_platform: string;
+  country_code: string;
+  start_date: string | null;
+  request_uv: number | null;
+  send_uv: number | null;
+  deliver_uv: number | null;
+  arrive_uv: number | null;
+  show_uv: number | null;
+  click_uv: number | null;
+  open_rate: number | null;
+  ctr: number | null;
+  ctor: number | null;
+  campaign_id: string | null;
+  campaign_name: string | null;
+  synced_at: string;
+}
+
+/**
+ * Performance metrics (CTR / CTOR) ingested from the governance Sheet,
+ * with the CommsPlanner campaign resolved via its Event IDs. Admin-only
+ * per platform (enforced by the RPC).
+ */
+export async function fetchCampaignMetrics(kind: AudienceKind): Promise<CampaignMetricRow[]> {
+  const { data, error } = await supabase.rpc("get_campaign_metrics", { p_kind: kind });
+  if (error) throw error;
+  return (data ?? []) as CampaignMetricRow[];
+}
+
 export async function fetchCampaignById(
   id: string,
   kind: AudienceKind,
