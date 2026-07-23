@@ -1,5 +1,9 @@
 # DiDi CommsPlanner
 
+> **¿Retomando el proyecto?** Lee primero **[HANDOFF.md](HANDOFF.md)**: estado
+> actual, trabajo pendiente, cómo se despliega (frontend / base de datos / Edge
+> Functions son canales separados) y las trampas conocidas.
+
 > Two apps sharing one codebase and one Supabase project: plan and review
 > marketing communications for **drivers** (DRV) and **passengers** (PAX)
 > across 8 LATAM countries for DiDi Labs. Push, WhatsApp, email, SMS,

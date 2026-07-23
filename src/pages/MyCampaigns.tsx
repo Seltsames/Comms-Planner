@@ -4,9 +4,12 @@ import { useAuth, type AudienceKind } from "@/lib/auth";
 import {
   fetchUserCampaigns,
   fetchCampaignSchedules,
+  fetchMyCampaignMetrics,
   cancelCampaignRpc,
   setCampaignEventIdsRpc,
+  type MyCampaignMetric,
 } from "@/lib/queries";
+import { getChannelColor, channelLabel } from "@/lib/channelStyles";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { buildNomenclature } from "@/lib/nomenclature";
@@ -40,6 +43,27 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
       (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
     );
   }, [campaigns]);
+
+  // Performance of my own campaigns, keyed by campaign id. Empty until the
+  // campaign carries the report's campaign_id as one of its Event IDs.
+  const { data: myMetrics } = useAutoRefresh(
+    () => fetchMyCampaignMetrics(kind).catch(() => [] as MyCampaignMetric[]),
+    60_000,
+    [kind],
+  );
+
+  const metricsByCampaign = useMemo(() => {
+    const map = new Map<string, MyCampaignMetric[]>();
+    for (const m of myMetrics ?? []) {
+      const list = map.get(m.campaign_id) ?? [];
+      list.push(m);
+      map.set(m.campaign_id, list);
+    }
+    for (const list of map.values()) {
+      list.sort((a, b) => (b.request_uv ?? 0) - (a.request_uv ?? 0));
+    }
+    return map;
+  }, [myMetrics]);
 
   /**
    * Download the approved campaign calendar as XLSX in calendar layout:
@@ -203,6 +227,7 @@ export default function MyCampaigns({ kind }: { kind: AudienceKind }) {
                 cancellingId={cancellingId}
                 onDownload={handleDownload}
                 downloadingId={downloadingId}
+                metrics={metricsByCampaign.get(campaign.id) ?? []}
                 onSaveEventIds={async (entries) => {
                   await setCampaignEventIdsRpc(campaign.id, kind, entries);
                   await refresh();
@@ -248,6 +273,7 @@ interface CampaignCardProps {
   }) => void;
   downloadingId: string | null;
   onSaveEventIds: (entries: EventIdEntry[]) => Promise<void>;
+  metrics: MyCampaignMetric[];
 }
 
 function CampaignCard({
@@ -257,6 +283,7 @@ function CampaignCard({
   onDownload,
   downloadingId,
   onSaveEventIds,
+  metrics,
 }: CampaignCardProps) {
   const start = new Date(campaign.start_date + "T12:00:00");
   const end = new Date(campaign.end_date + "T12:00:00");
@@ -334,6 +361,51 @@ function CampaignCard({
           })}
         </div>
       </div>
+
+      {/* Rendimiento real, una tarjeta por canal. Solo aparece cuando el
+          Event ID de la campaña coincide con el reporte sincronizado. */}
+      {metrics.length > 0 && (
+        <div className="mt-4 border-t border-slate-100 pt-3">
+          <p className="mb-2 text-[10px] font-bold uppercase tracking-wide text-slate-400">
+            Rendimiento
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {metrics.map((m) => {
+              const cc = getChannelColor(m.channel);
+              return (
+                <div
+                  key={m.channel}
+                  className="min-w-[132px] flex-1 rounded-xl border border-slate-200 bg-slate-50 p-3"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className={`h-2 w-2 shrink-0 rounded-full ${cc.dot}`} />
+                    <span className="truncate text-[11px] font-bold text-slate-700" title={m.channel}>
+                      {channelLabel(m.channel)}
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex items-baseline gap-1">
+                    <span className="text-[10px] uppercase text-slate-400">CTR</span>
+                    <span className="text-lg font-bold text-slate-800">
+                      {m.ctr !== null ? `${m.ctr.toFixed(2)}%` : "—"}
+                    </span>
+                  </div>
+                  <div className="flex items-baseline gap-1">
+                    <span className="text-[10px] uppercase text-slate-400">CTOR</span>
+                    <span className="text-sm font-semibold text-slate-600">
+                      {m.ctor !== null ? `${m.ctor.toFixed(2)}%` : "—"}
+                    </span>
+                  </div>
+                  {m.request_uv !== null && (
+                    <p className="mt-1 text-[10px] text-slate-400">
+                      {formatNumber(m.request_uv)} envíos
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </Card>
   );
 }
