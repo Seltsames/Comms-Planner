@@ -217,6 +217,50 @@ temporalmente un usuario falso:
 
 ---
 
+## Cohortes grandes: por qué la audiencia se sube por lotes
+
+Guardar un cohorte real (469.325 conductores) en una sola petición **tumba la
+base**, no solo falla. Medido en producción el 2026-07-23:
+
+| | |
+|---|---|
+| Cuerpo de la petición | 25 MB |
+| Parseo + ids distintos | 3.453 ms |
+| INSERT de la audiencia | ~13.600 ms (~34.400 filas/seg) |
+| **Total** | **~17 s** contra `statement_timeout` = **8 s** |
+
+El pico de memoria (JSON parseado + arreglo de 469k textos + INSERT, todos a la
+vez) provocó dos reinicios por apagado sucio. Se reprodujo tres veces.
+
+**Subir `statement_timeout` no sirve**: el temporizador se arma al inicio de la
+sentencia, así que un `SET` dentro de la función no lo re-arma (probado). Y más
+tiempo solo significa acumular más memoria antes de caer.
+
+La migración **00040** parte la subida en tres fases (`begin` → N × `append` →
+`finalize`), con lotes de 25.000 filas (~1,4 MB, ~0,7 s cada uno). Es invisible
+para quien usa la app: un CSV, un clic, una barra de progreso.
+
+**El borrador se oculta con `deleted_at`**, no con un filtro nuevo: así queda
+invisible en todas las funciones que ya filtran ese campo, sin tocarlas.
+`finalize` lo limpia. Solo hubo que parchear `check_cohort_conflicts` y
+`get_analytics_aggregates`, que no filtraban nada.
+
+**Los tres chequeos de conflicto se reescribieron.** Antes recibían el arreglo
+de ids y hacían `= ANY(...)`, con costo proporcional al cohorte (28 s en total).
+Ahora agregan primero sobre las campañas existentes (pocas filas) y solo después
+cruzan contra la audiencia ya cargada, por índice: 3.234 ms → 11 ms y
+17.430 ms → 3 ms. El chequeo de día bloqueado **necesita el CTE `MATERIALIZED`**;
+sin él el planificador arranca por la tabla grande y tarda ~10 s.
+
+> ⚠️ El proyecto está en **plan Free**. La instancia es pequeña y es la razón de
+> fondo de las caídas. Free tampoco permite ramas (`create_branch` da
+> `PaymentRequiredException`), así que **no hay entorno aislado para pruebas de
+> carga**. No hagas pruebas de volumen contra producción: tumban la app. Si
+> hacen falta, primero hay que subir a Pro.
+
+> La tabla de audiencia crecerá ~469k filas por campaña (~23M filas al año,
+> del orden de 3 GB con índices). Conviene una política de purga.
+
 ## Trampas conocidas (aprendidas a golpes)
 
 1. **Los errores "CORS" del navegador casi nunca son CORS.** Un `520` o un

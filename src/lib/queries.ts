@@ -372,27 +372,67 @@ export async function saveCampaignRpc(
     audience: Array<{ id: string; city_code: string | null }>;
   },
   kind: AudienceKind,
+  onProgress?: (uploaded: number, total: number) => void,
 ) {
   const idKey = kind === "pax" ? "pax_id" : "drv_id";
   const audience = params.audience.map((a) => ({ [idKey]: a.id, city_code: a.city_code }));
 
-  const { data, error } = await supabase.rpc(rpcName("save_campaign_v2", kind), {
-    p_name: params.name,
-    p_team: params.team,
-    p_sub_team: params.subTeam,
-    p_types: params.types,
-    p_action_keys: params.actionKeys,
-    p_country: params.country,
-    p_city_codes: params.cityCodes,
-    p_csv_file_name: params.csvFileName,
-    p_start_date: params.startDate,
-    p_end_date: params.endDate,
-    p_status: params.status ?? "pending",
-    p_schedules: params.schedules,
-    p_audience: audience,
-  });
-  if (error) throw error;
-  return data as string;
+  // The audience travels in batches instead of one request. A real cohort of
+  // 469k rows is a 25 MB body that Postgres expands into the parsed JSON plus
+  // a 469k-element array plus the insert, all in memory at once: ~17 s against
+  // an 8 s statement_timeout, and enough memory pressure to take the instance
+  // down (it did, twice, on 2026-07-23). At 25k rows a batch is ~1.4 MB and
+  // ~0.7 s, so every request stays far inside both limits.
+  const CHUNK = 25_000;
+
+  const { data: campaignId, error: beginErr } = await supabase.rpc(
+    rpcName("begin_campaign_upload", kind),
+    {
+      p_name: params.name,
+      p_team: params.team,
+      p_sub_team: params.subTeam,
+      p_types: params.types,
+      p_action_keys: params.actionKeys,
+      p_country: params.country,
+      p_city_codes: params.cityCodes,
+      p_csv_file_name: params.csvFileName,
+      p_start_date: params.startDate,
+      p_end_date: params.endDate,
+      p_schedules: params.schedules,
+    },
+  );
+  if (beginErr) throw beginErr;
+  const id = campaignId as string;
+
+  try {
+    onProgress?.(0, audience.length);
+    for (let i = 0; i < audience.length; i += CHUNK) {
+      const { error } = await supabase.rpc(rpcName("append_campaign_audience", kind), {
+        p_campaign_id: id,
+        p_audience: audience.slice(i, i + CHUNK),
+      });
+      if (error) throw error;
+      onProgress?.(Math.min(i + CHUNK, audience.length), audience.length);
+    }
+
+    const { error: finErr } = await supabase.rpc(rpcName("finalize_campaign_upload", kind), {
+      p_campaign_id: id,
+      p_status: params.status ?? null,
+    });
+    if (finErr) throw finErr;
+  } catch (e) {
+    // Leave no half-uploaded draft behind. It is already invisible (it carries
+    // deleted_at), and the server purges stale ones after 2 h, but dropping it
+    // now keeps the table clean. A failure here must not mask the real error.
+    try {
+      await supabase.rpc(rpcName("abort_campaign_upload", kind), { p_campaign_id: id });
+    } catch {
+      /* ignore */
+    }
+    throw e;
+  }
+
+  return id;
 }
 
 export { };
