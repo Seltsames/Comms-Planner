@@ -191,6 +191,29 @@ export async function fetchCampaignMetrics(kind: AudienceKind): Promise<Campaign
   return (data ?? []) as CampaignMetricRow[];
 }
 
+export interface MyCampaignMetric {
+  campaign_id: string;
+  channel: string;
+  request_uv: number | null;
+  arrive_uv: number | null;
+  show_uv: number | null;
+  click_uv: number | null;
+  ctr: number | null;
+  ctor: number | null;
+  report_rows: number;
+}
+
+/**
+ * Metrics for the caller's own campaigns, aggregated per campaign +
+ * channel. Available to any signed-in user (the admin-wide view lives in
+ * fetchCampaignMetrics).
+ */
+export async function fetchMyCampaignMetrics(kind: AudienceKind): Promise<MyCampaignMetric[]> {
+  const { data, error } = await supabase.rpc("get_my_campaign_metrics", { p_kind: kind });
+  if (error) throw error;
+  return (data ?? []) as MyCampaignMetric[];
+}
+
 export async function fetchCampaignById(
   id: string,
   kind: AudienceKind,
