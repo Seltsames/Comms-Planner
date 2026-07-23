@@ -13,7 +13,7 @@ export interface ConflictEntry {
 }
 
 interface CohortConflictPreviewProps {
-  drvIds: string[];
+  cohortId: string | null;
   country: string;
   startDate: string;
   endDate: string;
@@ -21,7 +21,7 @@ interface CohortConflictPreviewProps {
 }
 
 export function CohortConflictPreview({
-  drvIds,
+  cohortId,
   country,
   startDate,
   endDate,
@@ -32,7 +32,7 @@ export function CohortConflictPreview({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (drvIds.length === 0) {
+    if (!cohortId) {
       setConflicts([]);
       return;
     }
@@ -41,7 +41,7 @@ export function CohortConflictPreview({
     setLoading(true);
     setError(null);
 
-    checkCohortConflictsRpc(drvIds, country, startDate, endDate, kind)
+    checkCohortConflictsRpc(cohortId, country, startDate, endDate, kind)
       .then((result) => {
         if (cancelled) return;
         // RPC returns conflicting_drv_count OR conflicting_pax_count depending on kind.
@@ -66,9 +66,9 @@ export function CohortConflictPreview({
     return () => {
       cancelled = true;
     };
-  }, [drvIds.join(","), country, startDate, endDate, kind]);
+  }, [cohortId, country, startDate, endDate, kind]);
 
-  if (drvIds.length === 0) return null;
+  if (!cohortId) return null;
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-4">

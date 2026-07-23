@@ -24,7 +24,7 @@ interface TimeSlotPickerProps {
   /** Event-driven channels (Push trigger): schedule by day only, no time. */
   isTriggerOnly?: boolean;
   blockedDates: Set<string>;
-  audienceIds: string[];
+  cohortId: string | null;
   kind: AudienceKind;
   onConflictsChange?: (
     conflicts: Array<{ date: string; reason: string; actionKey: string }>,
@@ -140,7 +140,7 @@ export function TimeSlotPicker({
   isRangeOnly,
   isTriggerOnly = false,
   blockedDates,
-  audienceIds,
+  cohortId,
   kind,
   onConflictsChange,
 }: TimeSlotPickerProps) {
@@ -164,7 +164,7 @@ export function TimeSlotPicker({
   useEffect(() => {
     let cancelled = false;
     setLoadingSlots(true);
-    getSlotAvailabilityV2(country, cityCodes, startDate, endDate, [actionKey], audienceIds, kind)
+    getSlotAvailabilityV2(country, cityCodes, startDate, endDate, [actionKey], cohortId, kind)
       .then((slots) => {
         if (cancelled) return;
         const map: Record<string, SlotAvailabilityV2> = {};
@@ -204,7 +204,9 @@ export function TimeSlotPicker({
     return () => {
       cancelled = true;
     };
-  }, [country, cityCodes, startDate, endDate, actionKey, audienceIds.join(","), kind]);
+  // cohortId is a stable uuid. The old dependency was audienceIds.join(","),
+  // which built a ~9 MB string on every render with a real cohort.
+  }, [country, cityCodes, startDate, endDate, actionKey, cohortId, kind]);
 
   const makeKey = (date: string, slot: string) => `${date}|${slot}`;
   const isSelected = (date: string, slot: string) => !!selectedSlots[makeKey(date, slot)];

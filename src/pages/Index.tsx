@@ -16,7 +16,7 @@ import {
   type CohortState,
 } from "@/features/cohorts/CohortUploader";
 import { CohortConflictPreview } from "@/features/cohorts/CohortConflictPreview";
-import { saveCampaignRpc } from "@/lib/queries";
+import { saveCampaignRpc, uploadCohortDraft } from "@/lib/queries";
 import { formatNumber } from "@/lib/format";
 import { buildNomenclature } from "@/lib/nomenclature";
 import { TimeSlotPicker } from "@/components/TimeSlotPicker";
@@ -80,6 +80,67 @@ export default function Index() {
     () => computeEffectiveDrvIds(cohort, cityCodes),
     [cohort, cityCodes],
   );
+
+  // The cohort is uploaded once, here, into a hidden draft campaign. From then
+  // on the slot picker, the conflict preview and the save reference it by id
+  // instead of resending ~9 MB of ids on every interaction.
+  const [cohortId, setCohortId] = useState<string | null>(null);
+  const uploadedRef = useRef<{ cohort: unknown; cities: string; country: string } | null>(null);
+
+  useEffect(() => {
+    if (effectiveDrvIds.length === 0 || !country) {
+      setCohortId(null);
+      uploadedRef.current = null;
+      return;
+    }
+    const citiesKey = cityCodes.join(",");
+    const prev = uploadedRef.current;
+    if (prev && prev.cohort === cohort && prev.cities === citiesKey && prev.country === country) {
+      return; // same cohort and same city selection: nothing to re-upload
+    }
+
+    let cancelled = false;
+    uploadedRef.current = { cohort, cities: citiesKey, country };
+    setCohortId(null);
+    setSaveError(null);
+
+    uploadCohortDraft(
+      {
+        audience: buildAudience(),
+        country,
+        cityCodes,
+        startDate,
+        endDate: isRange ? endDate : startDate,
+      },
+      kind,
+      (uploaded, total) => {
+        if (!cancelled) setSaveProgress({ uploaded, total });
+      },
+    )
+      .then((id) => {
+        if (!cancelled) {
+          setCohortId(id);
+          setSaveProgress(null);
+        }
+      })
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        setSaveProgress(null);
+        uploadedRef.current = null;
+        const msg =
+          typeof e === "object" && e !== null && "message" in e
+            ? String((e as { message: unknown }).message)
+            : "Error cargando la audiencia";
+        setSaveError(msg);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+    // buildAudience/startDate/endDate are read at upload time only: re-running
+    // on a date change would re-upload the whole cohort for nothing.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cohort, cityCodes, country, kind, effectiveDrvIds.length]);
 
   const nomenclature = useMemo(
     () => buildNomenclature(kind, country, team, subTeam, name),
@@ -276,6 +337,10 @@ export default function Index() {
 
   async function handleSave() {
     if (!user?.id) return;
+    if (!cohortId) {
+      setSaveError("La audiencia todavía se está cargando. Espera a que termine.");
+      return;
+    }
     setSaveLoading(true);
     setSaveError(null);
     try {
@@ -293,10 +358,9 @@ export default function Index() {
           endDate: isRange ? endDate : startDate,
           status: "pending",
           schedules: buildSchedules(),
-          audience: buildAudience(),
+          cohortId,
         },
         kind,
-        (uploaded, total) => setSaveProgress({ uploaded, total }),
       );
       void campaignId;
       // No success modal: reset the builder and land directly on the
@@ -630,7 +694,7 @@ export default function Index() {
               {effectiveDrvIds.length > 0 && (
                 <div className="mt-4">
                   <CohortConflictPreview
-                    drvIds={effectiveDrvIds}
+                    cohortId={cohortId}
                     country={country}
                     startDate={startDate}
                     endDate={isRange ? endDate : startDate}
@@ -721,7 +785,7 @@ export default function Index() {
                         isRangeOnly={isRangeOnly}
                         isTriggerOnly={isTriggerOnly}
                         blockedDates={blockedDates}
-                        audienceIds={effectiveDrvIds}
+                        cohortId={cohortId}
                         kind={kind}
                         onConflictsChange={(conflicts, counts) => {
                           setChannelConflicts((prev) => ({
