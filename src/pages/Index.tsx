@@ -17,6 +17,7 @@ import {
 } from "@/features/cohorts/CohortUploader";
 import { CohortConflictPreview } from "@/features/cohorts/CohortConflictPreview";
 import { saveCampaignRpc } from "@/lib/queries";
+import { formatNumber } from "@/lib/format";
 import { buildNomenclature } from "@/lib/nomenclature";
 import { TimeSlotPicker } from "@/components/TimeSlotPicker";
 import { ScheduledCommsPreview, type ScheduledComm } from "@/components/ScheduledCommsPreview";
@@ -37,6 +38,9 @@ export default function Index() {
 
   const [saveLoading, setSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // Batch upload progress. Null while not saving; the audience travels in
+  // batches, so a large cohort takes ~20 s and needs visible feedback.
+  const [saveProgress, setSaveProgress] = useState<{ uploaded: number; total: number } | null>(null);
 
   const [citiesOpen, setCitiesOpen] = useState(false);
   const [cityChipsOpen, setCityChipsOpen] = useState(false);
@@ -292,6 +296,7 @@ export default function Index() {
           audience: buildAudience(),
         },
         kind,
+        (uploaded, total) => setSaveProgress({ uploaded, total }),
       );
       void campaignId;
       // No success modal: reset the builder and land directly on the
@@ -309,6 +314,7 @@ export default function Index() {
       setSaveError(msg);
     } finally {
       setSaveLoading(false);
+      setSaveProgress(null);
     }
   }
 
@@ -743,6 +749,27 @@ export default function Index() {
                 <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-700">
                   {saveError}
                 </p>
+              )}
+
+              {saveProgress && saveProgress.total > 0 && (
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+                  <div className="mb-1.5 flex items-baseline justify-between text-xs">
+                    <span className="font-semibold text-slate-600">
+                      Cargando audiencia…
+                    </span>
+                    <span className="tabular-nums text-slate-500">
+                      {formatNumber(saveProgress.uploaded)} / {formatNumber(saveProgress.total)}
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+                    <div
+                      className="h-full rounded-full bg-brand-500 transition-[width] duration-300"
+                      style={{
+                        width: `${Math.round((saveProgress.uploaded / saveProgress.total) * 100)}%`,
+                      }}
+                    />
+                  </div>
+                </div>
               )}
               <div className="mt-6 flex justify-between">
                 <button
