@@ -22,10 +22,6 @@ function rpcName(base: string, kind: AudienceKind): string {
   return kind === "pax" ? `${base}_pax` : base;
 }
 
-function audienceIdsParam(kind: AudienceKind) {
-  return kind === "pax" ? "p_pax_ids" : "p_drv_ids";
-}
-
 // ---------------------------------------------------------------------------
 // Slot availability
 // ---------------------------------------------------------------------------
@@ -35,16 +31,20 @@ export async function getSlotAvailabilityV2(
   startDate: string,
   endDate: string,
   actionKeys: string[],
-  audienceIds: string[],
+  // The cohort is referenced by the draft campaign that already holds it,
+  // never re-sent. Passing the ids meant ~9 MB per call, once per channel and
+  // on every date change: that is what saturated the instance before the save
+  // even started (500/520 on this RPC in the logs).
+  cohortId: string | null,
   kind: AudienceKind,
 ): Promise<SlotAvailabilityV2[]> {
-  const { data, error } = await supabase.rpc(rpcName("get_slot_availability_v2", kind), {
+  const { data, error } = await supabase.rpc(rpcName("get_slot_availability_by_cohort", kind), {
     p_country: country,
     p_city_codes: cityCodes,
     p_start_date: startDate,
     p_end_date: endDate,
     p_action_keys: actionKeys,
-    [audienceIdsParam(kind)]: audienceIds,
+    p_cohort_id: cohortId,
   });
   if (error) throw error;
   return (data ?? []) as SlotAvailabilityV2[];
@@ -321,20 +321,23 @@ export type AnalyticsAggregates = {
 // Cohort conflict check
 // ---------------------------------------------------------------------------
 export async function checkCohortConflictsRpc(
-  audienceIds: string[],
+  // Same reasoning as getSlotAvailabilityV2: reference the cohort, never resend it.
+  cohortId: string,
   country: string,
   startDate: string,
   endDate: string,
   kind: AudienceKind,
 ) {
-  const baseName = "check_cohort_conflicts";
   const args: Record<string, unknown> = {
+    p_cohort_id: cohortId,
     p_country: country,
     p_start_date: startDate,
     p_end_date: endDate,
-    [audienceIdsParam(kind)]: audienceIds,
   };
-  const { data, error } = await supabase.rpc(rpcName(baseName, kind), args);
+  const { data, error } = await supabase.rpc(
+    rpcName("check_cohort_conflicts_by_cohort", kind),
+    args,
+  );
   if (error) throw error;
   return data as Array<{
     campaign_id: string;
@@ -369,11 +372,52 @@ export async function saveCampaignRpc(
       time_slot: string;
       image_url?: string;
     }>;
+    /** Draft that already holds the uploaded audience (see uploadCohortDraft). */
+    cohortId: string;
+  },
+  kind: AudienceKind,
+) {
+  const { error: updErr } = await supabase.rpc(rpcName("update_campaign_draft", kind), {
+    p_campaign_id: params.cohortId,
+    p_name: params.name,
+    p_team: params.team,
+    p_sub_team: params.subTeam,
+    p_types: params.types,
+    p_action_keys: params.actionKeys,
+    p_country: params.country,
+    p_city_codes: params.cityCodes,
+    p_csv_file_name: params.csvFileName,
+    p_start_date: params.startDate,
+    p_end_date: params.endDate,
+    p_schedules: params.schedules,
+  });
+  if (updErr) throw updErr;
+
+  const { data, error } = await supabase.rpc(rpcName("finalize_campaign_upload", kind), {
+    p_campaign_id: params.cohortId,
+    p_status: params.status ?? null,
+  });
+  if (error) throw error;
+  void data;
+  return params.cohortId;
+}
+
+/**
+ * Uploads a cohort once, in batches, into a hidden draft campaign and returns
+ * its id. Everything afterwards (slot availability, conflict preview, saving)
+ * references that id instead of resending the ids.
+ */
+export async function uploadCohortDraft(
+  params: {
     audience: Array<{ id: string; city_code: string | null }>;
+    country: string;
+    cityCodes: string[];
+    startDate: string;
+    endDate: string;
   },
   kind: AudienceKind,
   onProgress?: (uploaded: number, total: number) => void,
-) {
+): Promise<string> {
   const idKey = kind === "pax" ? "pax_id" : "drv_id";
   const audience = params.audience.map((a) => ({ [idKey]: a.id, city_code: a.city_code }));
 
@@ -388,17 +432,20 @@ export async function saveCampaignRpc(
   const { data: campaignId, error: beginErr } = await supabase.rpc(
     rpcName("begin_campaign_upload", kind),
     {
-      p_name: params.name,
-      p_team: params.team,
-      p_sub_team: params.subTeam,
-      p_types: params.types,
-      p_action_keys: params.actionKeys,
+      // Placeholders: the draft is created as soon as the CSV is validated,
+      // before the campaign has a name or channels. update_campaign_draft
+      // fills in the real values at save time.
+      p_name: "(borrador)",
+      p_team: "",
+      p_sub_team: null,
+      p_types: [],
+      p_action_keys: [],
       p_country: params.country,
       p_city_codes: params.cityCodes,
-      p_csv_file_name: params.csvFileName,
+      p_csv_file_name: "",
       p_start_date: params.startDate,
       p_end_date: params.endDate,
-      p_schedules: params.schedules,
+      p_schedules: [],
     },
   );
   if (beginErr) throw beginErr;
@@ -414,12 +461,6 @@ export async function saveCampaignRpc(
       if (error) throw error;
       onProgress?.(Math.min(i + CHUNK, audience.length), audience.length);
     }
-
-    const { error: finErr } = await supabase.rpc(rpcName("finalize_campaign_upload", kind), {
-      p_campaign_id: id,
-      p_status: params.status ?? null,
-    });
-    if (finErr) throw finErr;
   } catch (e) {
     // Leave no half-uploaded draft behind. It is already invisible (it carries
     // deleted_at), and the server purges stale ones after 2 h, but dropping it
