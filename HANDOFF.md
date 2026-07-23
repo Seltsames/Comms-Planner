@@ -252,6 +252,32 @@ cruzan contra la audiencia ya cargada, por índice: 3.234 ms → 11 ms y
 17.430 ms → 3 ms. El chequeo de día bloqueado **necesita el CTE `MATERIALIZED`**;
 sin él el planificador arranca por la tabla grande y tarda ~10 s.
 
+### Espacio en disco: el límite real
+
+Una campaña de 469k conductores ocupaba **222 MB**, de los cuales sólo 38 MB
+eran datos. Tras la 00043 y un `REINDEX` manual quedó en **79 MB**.
+
+| | Por fila | Total |
+|---|---|---|
+| CSV de origen | 16 bytes | 7,5 MB |
+| Datos en Postgres | 84 bytes | 38 MB |
+| Índices (antes) | 410 bytes | 184 MB |
+| Índices (después) | ~91 bytes | 41 MB |
+
+**El WAL compite por el mismo disco.** Tras cargar un cohorte grande y
+reindexar, `pg_ls_waldir()` mostró **384 MB de WAL — más que la base entera
+(227 MB)**. Mientras esté ahí no hay espacio para los archivos temporales que
+necesita `get_analytics_aggregates`, y el dashboard devuelve ceros. Se recicla
+solo en los checkpoints automáticos (~5 min); `CHECKPOINT` **no se puede
+forzar** (Supabase no expone el rol `pg_checkpoint`). Si tras media hora sigue
+alto, buscar un slot de replicación reteniéndolo.
+
+> Diagnóstico rápido cuando el dashboard muestre ceros:
+> ```sql
+> select pg_size_pretty(sum(size)), count(*) from pg_ls_waldir();
+> select pg_size_pretty(pg_database_size(current_database()));
+> ```
+
 > ⚠️ El proyecto está en **plan Free**. La instancia es pequeña y es la razón de
 > fondo de las caídas. Free tampoco permite ramas (`create_branch` da
 > `PaymentRequiredException`), así que **no hay entorno aislado para pruebas de
