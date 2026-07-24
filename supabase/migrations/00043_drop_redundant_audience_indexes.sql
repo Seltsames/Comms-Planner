@@ -45,3 +45,9 @@ DROP INDEX IF EXISTS drv.idx_audience_city_code;
 ALTER TABLE pax.campaign_audience DROP CONSTRAINT IF EXISTS campaign_audience_pkey;
 DROP INDEX IF EXISTS pax.idx_audience_campaign_id;
 DROP INDEX IF EXISTS pax.idx_audience_city_code;
+
+-- ⚠️ Los tres DROP de PAX de arriba NO surtieron efecto: en pax los índices
+-- llevan prefijo (pax_idx_audience_campaign_id), y el IF EXISTS los ignoró en
+-- silencio. Corregido en 00044, que además verifica el resultado en vez de
+-- confiar en el IF EXISTS. Lección: IF EXISTS convierte un nombre equivocado
+-- en un no-op silencioso — comprobar siempre después.
