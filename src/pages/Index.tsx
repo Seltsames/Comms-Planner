@@ -356,7 +356,8 @@ export default function Index() {
           csvFileName: `cohort_${nomenclature}.csv`,
           startDate,
           endDate: isRange ? endDate : startDate,
-          status: "pending",
+          // No status hint: the system decides. Auto-approved unless a real
+          // scheduling clash (or the 3+ push day-lock) sends it to review.
           schedules: buildSchedules(),
           cohortId,
         },
