@@ -241,6 +241,45 @@ export async function cancelCampaignRpc(campaignId: string, kind: AudienceKind):
   if (error) throw error;
 }
 
+/**
+ * Admin edit of an existing campaign: metadata + channels + cities + dates +
+ * schedules. The cohort (audience) is not touched. Re-validates on the server
+ * and returns the resulting status ('approved' | 'pending'), or throws if the
+ * edit would day-lock a driver.
+ */
+export async function updateCampaignRpc(
+  campaignId: string,
+  kind: AudienceKind,
+  params: {
+    name: string;
+    team: string;
+    subTeam: string | null;
+    types: string[];
+    actionKeys: string[];
+    country: string;
+    cityCodes: string[];
+    startDate: string;
+    endDate: string;
+    schedules: Array<{ action_key: string; schedule_date: string; time_slot: string }>;
+  },
+): Promise<string> {
+  const { data, error } = await supabase.rpc(rpcName("update_campaign", kind), {
+    p_campaign_id: campaignId,
+    p_name: params.name,
+    p_team: params.team,
+    p_sub_team: params.subTeam,
+    p_types: params.types,
+    p_action_keys: params.actionKeys,
+    p_country: params.country,
+    p_city_codes: params.cityCodes,
+    p_start_date: params.startDate,
+    p_end_date: params.endDate,
+    p_schedules: params.schedules,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function approveCampaignRpc(
   campaignId: string,
   kind: AudienceKind,
