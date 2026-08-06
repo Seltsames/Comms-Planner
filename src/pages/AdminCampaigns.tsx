@@ -9,6 +9,8 @@ import {
   setCampaignEventIdsRpc,
 } from "@/lib/queries";
 import { EventIdsEditor, parseEventIds } from "@/components/EventIdsEditor";
+import { CampaignEditModal } from "@/components/CampaignEditModal";
+import type { AdminCampaignRow } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
 import { supabase } from "@/lib/supabase";
@@ -28,6 +30,7 @@ export default function AdminCampaigns() {
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  const [editing, setEditing] = useState<AdminCampaignRow | null>(null);
 
   // Single call returns campaigns from BOTH schemas, tagged with `kind`.
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
@@ -254,6 +257,12 @@ export default function AdminCampaigns() {
                   <td className="px-4 py-3 text-slate-600">{c.action_keys.join(", ")}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">
+                      <button
+                        onClick={() => setEditing(c)}
+                        className="rounded border border-slate-200 bg-white px-2 py-1 text-xs font-medium text-slate-600 hover:bg-slate-50"
+                      >
+                        Editar
+                      </button>
                       {c.status === "pending" && (
                         <>
                           <button
@@ -287,6 +296,17 @@ export default function AdminCampaigns() {
           </tbody>
         </table>
       </div>
+
+      {editing && (
+        <CampaignEditModal
+          campaign={editing}
+          onClose={() => setEditing(null)}
+          onSaved={async () => {
+            setEditing(null);
+            await refresh();
+          }}
+        />
+      )}
     </div>
   );
 }
