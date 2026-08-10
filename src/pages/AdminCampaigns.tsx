@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Clock } from "lucide-react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
@@ -56,7 +57,13 @@ export default function AdminCampaigns() {
   const { platformAccess } = useAuth();
   const [actionId, setActionId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
-  const [kindFilter, setKindFilter] = useState<KindFilter>("all");
+  // Default the filter to the platform the admin arrived from (?kind), so
+  // clicking "Campañas" while on PAX lands on the PAX campaigns.
+  const [searchParams] = useSearchParams();
+  const paramKind = searchParams.get("kind");
+  const [kindFilter, setKindFilter] = useState<KindFilter>(
+    paramKind === "pax" || paramKind === "drv" ? paramKind : "all",
+  );
   const [editing, setEditing] = useState<AdminCampaignRow | null>(null);
   const [viewingSchedules, setViewingSchedules] = useState<AdminCampaignRow | null>(null);
 
