@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
-import { Clock } from "lucide-react";
+import { Clock, AlertTriangle } from "lucide-react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
   fetchAllCampaignsBoth,
   fetchAudienceCountsBoth,
+  fetchCampaignSchedules,
   approveCampaignRpc,
   rejectCampaignRpc,
   deleteCampaignHardRpc,
@@ -24,6 +25,30 @@ interface ProfileLookup {
 }
 
 type KindFilter = "all" | AudienceKind;
+
+// Minute-of-day a schedule's communication is considered to END at.
+function slotEndMinutes(timeSlot: string): number {
+  if (timeSlot === "TRIGGER" || timeSlot === "FULL_DAY") return 1439; // end of day
+  const parts = timeSlot.split("-");
+  const hhmm = parts.length > 1 ? parts[1] : parts[0]; // range end, else the time
+  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
+  if (Number.isNaN(h)) return 1439;
+  return h * 60 + (Number.isNaN(m) ? 0 : m);
+}
+
+// When the campaign's LAST scheduled communication ends, as a Date. Null if it
+// has no schedules.
+function lastCommEnd(rows: Array<{ schedule_date: string; time_slot: string }>): Date | null {
+  let latest: Date | null = null;
+  for (const r of rows) {
+    const d = new Date(r.schedule_date + "T00:00:00");
+    d.setMinutes(slotEndMinutes(r.time_slot));
+    if (!latest || d > latest) latest = d;
+  }
+  return latest;
+}
+
+const ALERT_AFTER_MS = 24 * 60 * 60 * 1000; // 24 h after the campaign ends
 
 export default function AdminCampaigns() {
   // Platform-scoped admin: only the sides in platformAccess are shown
@@ -70,6 +95,43 @@ export default function AdminCampaigns() {
     }
     return map;
   }, [profiles]);
+
+  // Schedules for the managed platforms — small table — used to know when each
+  // campaign's last communication ends. Refreshes on the same 60s cadence.
+  const platformsKey = platformAccess.join(",");
+  const { data: allSchedules } = useAutoRefresh(
+    async () => {
+      const results = await Promise.all(
+        platformAccess.map((k) => fetchCampaignSchedules(k).catch(() => [])),
+      );
+      return results.flat() as Array<{
+        campaign_id: string;
+        schedule_date: string;
+        time_slot: string;
+      }>;
+    },
+    60_000,
+    [platformsKey],
+  );
+
+  // Campaigns whose last comm ended more than 24 h ago (approved only — those
+  // actually ran). campaign_id keys are uuids, unique across drv/pax.
+  const endedAlertIds = useMemo(() => {
+    const byCampaign = new Map<string, Array<{ schedule_date: string; time_slot: string }>>();
+    for (const s of allSchedules ?? []) {
+      const list = byCampaign.get(s.campaign_id) ?? [];
+      list.push(s);
+      byCampaign.set(s.campaign_id, list);
+    }
+    const now = Date.now();
+    const alerted = new Set<string>();
+    for (const c of campaigns ?? []) {
+      if (c.status !== "approved") continue;
+      const end = lastCommEnd(byCampaign.get(c.id) ?? []);
+      if (end && now > end.getTime() + ALERT_AFTER_MS) alerted.add(c.id);
+    }
+    return alerted;
+  }, [allSchedules, campaigns]);
 
   const scopedCampaigns = useMemo(
     () => (campaigns ?? []).filter((c) => platformAccess.includes(c.kind)),
@@ -171,6 +233,21 @@ export default function AdminCampaigns() {
         )}
       </div>
 
+      {(() => {
+        const n = visibleCampaigns.filter((c) => endedAlertIds.has(c.id)).length;
+        if (n === 0) return null;
+        return (
+          <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            <AlertTriangle size={16} className="shrink-0" />
+            <span>
+              {n === 1
+                ? "1 campaña terminó hace más de 24 h — revisa sus resultados."
+                : `${n} campañas terminaron hace más de 24 h — revisa sus resultados.`}
+            </span>
+          </div>
+        );
+      })()}
+
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           Error cargando campañas: {error}
@@ -239,7 +316,17 @@ export default function AdminCampaigns() {
                     <KindChip kind={c.kind} />
                   </td>
                   <td className="px-4 py-3">
-                    <StatusBadge status={c.status} />
+                    <div className="flex flex-col items-start gap-1">
+                      <StatusBadge status={c.status} />
+                      {endedAlertIds.has(c.id) && (
+                        <span
+                          title="La última comunicación terminó hace más de 24 h"
+                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
+                        >
+                          <AlertTriangle size={10} /> Finalizada +24 h
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td className="px-4 py-3 text-slate-500">
                     {c.start_date === c.end_date ? (
