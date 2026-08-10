@@ -10,6 +10,9 @@ export const DRV_TEAMS_HIERARCHY = [
   },
   { team: "Engagement", subTeams: ["Loyalty", "Earnings OPS"] },
   { team: "Experience", subTeams: ["Safety and Service Governance"] },
+  // Flat teams: no sub-teams, only the team is chosen.
+  { team: "Índigo", subTeams: [] },
+  { team: "AR HUB", subTeams: [] },
 ] as const;
 
 export const DRV_TEAMS = DRV_TEAMS_HIERARCHY.map((t) => t.team);
