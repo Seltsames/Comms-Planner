@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Clock, AlertTriangle } from "lucide-react";
+import { Clock } from "lucide-react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
   fetchAllCampaignsBoth,
@@ -114,9 +114,10 @@ export default function AdminCampaigns() {
     [platformsKey],
   );
 
-  // Campaigns whose last comm ended more than 24 h ago (approved only — those
-  // actually ran). campaign_id keys are uuids, unique across drv/pax.
-  const endedAlertIds = useMemo(() => {
+  // Approved campaigns whose last communication ended more than 24 h ago are
+  // "Concluded"; the rest are "On going". campaign_id keys are uuids, unique
+  // across drv/pax.
+  const concludedIds = useMemo(() => {
     const byCampaign = new Map<string, Array<{ schedule_date: string; time_slot: string }>>();
     for (const s of allSchedules ?? []) {
       const list = byCampaign.get(s.campaign_id) ?? [];
@@ -124,13 +125,13 @@ export default function AdminCampaigns() {
       byCampaign.set(s.campaign_id, list);
     }
     const now = Date.now();
-    const alerted = new Set<string>();
+    const concluded = new Set<string>();
     for (const c of campaigns ?? []) {
       if (c.status !== "approved") continue;
       const end = lastCommEnd(byCampaign.get(c.id) ?? []);
-      if (end && now > end.getTime() + ALERT_AFTER_MS) alerted.add(c.id);
+      if (end && now > end.getTime() + ALERT_AFTER_MS) concluded.add(c.id);
     }
-    return alerted;
+    return concluded;
   }, [allSchedules, campaigns]);
 
   const scopedCampaigns = useMemo(
@@ -233,21 +234,6 @@ export default function AdminCampaigns() {
         )}
       </div>
 
-      {(() => {
-        const n = visibleCampaigns.filter((c) => endedAlertIds.has(c.id)).length;
-        if (n === 0) return null;
-        return (
-          <div className="mb-4 flex items-center gap-2 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-            <AlertTriangle size={16} className="shrink-0" />
-            <span>
-              {n === 1
-                ? "1 campaña terminó hace más de 24 h — revisa sus resultados."
-                : `${n} campañas terminaron hace más de 24 h — revisa sus resultados.`}
-            </span>
-          </div>
-        );
-      })()}
-
       {error && (
         <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           Error cargando campañas: {error}
@@ -271,6 +257,7 @@ export default function AdminCampaigns() {
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Usuario</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Tipo</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Estado</th>
+              <th className="px-4 py-3 text-left font-semibold text-slate-600">Progreso</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Fechas</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">País</th>
               <th className="px-4 py-3 text-left font-semibold text-slate-600">Ciudades</th>
@@ -316,17 +303,20 @@ export default function AdminCampaigns() {
                     <KindChip kind={c.kind} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="flex flex-col items-start gap-1">
-                      <StatusBadge status={c.status} />
-                      {endedAlertIds.has(c.id) && (
-                        <span
-                          title="La última comunicación terminó hace más de 24 h"
-                          className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700"
-                        >
-                          <AlertTriangle size={10} /> Finalizada +24 h
-                        </span>
-                      )}
-                    </div>
+                    <StatusBadge status={c.status} />
+                  </td>
+                  <td className="px-4 py-3">
+                    {c.status !== "approved" ? (
+                      <span className="text-xs text-slate-400">—</span>
+                    ) : concludedIds.has(c.id) ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-semibold text-slate-600">
+                        <span className="h-1.5 w-1.5 rounded-full bg-slate-400" /> Concluded
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-xs font-semibold text-emerald-700">
+                        <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" /> On going
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-500">
                     {c.start_date === c.end_date ? (
