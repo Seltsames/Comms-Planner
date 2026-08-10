@@ -242,9 +242,14 @@ export default function AdminCampaigns() {
                     <StatusBadge status={c.status} />
                   </td>
                   <td className="px-4 py-3 text-slate-500">
-                    {c.start_date === c.end_date
-                      ? c.start_date
-                      : `${c.start_date} – ${c.end_date}`}
+                    {c.start_date === c.end_date ? (
+                      <span className="whitespace-nowrap">{c.start_date}</span>
+                    ) : (
+                      <div className="flex flex-col leading-tight">
+                        <span className="whitespace-nowrap">{c.start_date}</span>
+                        <span className="whitespace-nowrap text-slate-400">– {c.end_date}</span>
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-3 text-slate-600">{c.country}</td>
                   <td className="px-4 py-3 text-slate-600">{c.city_codes.length}</td>
