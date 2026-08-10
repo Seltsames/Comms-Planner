@@ -8,10 +8,18 @@ export default function Navbar() {
   const location = useLocation();
 
   // The URL is the source of truth for which audience side is on screen.
-  // The context's `audienceKind` is a persistent hint (localStorage) used
-  // by non-URL consumers (e.g. CSV download metadata); sync it on every
-  // URL change so the two never disagree.
-  const urlKind = audienceKindFromPath(location.pathname);
+  // Admin routes (/admin/*) are shared across platforms and carry the side in
+  // a ?kind query param instead of the path — read it there, falling back to
+  // the persisted side (or the only platform a single-platform admin has) so
+  // the navbar never wrongly flips to Driver on the admin pages.
+  const urlKind: AudienceKind = (() => {
+    if (location.pathname.startsWith("/admin")) {
+      const k = new URLSearchParams(location.search).get("kind");
+      if (k === "pax" || k === "drv") return k;
+      return platformAccess.length === 1 ? platformAccess[0] : audienceKind;
+    }
+    return audienceKindFromPath(location.pathname);
+  })();
   useEffect(() => {
     if (audienceKind !== urlKind) {
       setAudienceKind(urlKind);
@@ -144,7 +152,7 @@ export default function Navbar() {
           {role === "admin" && (
             <>
               <NavLink
-                to="/admin/campaigns"
+                to={`/admin/campaigns?kind=${urlKind}`}
                 className={({ isActive }) =>
                   `rounded-lg px-3 py-2 font-medium transition ${
                     isActive ? "bg-brand-50 text-brand-600" : "text-slate-600 hover:bg-slate-100"
@@ -154,7 +162,7 @@ export default function Navbar() {
                 Campañas
               </NavLink>
               <NavLink
-                to="/admin/users"
+                to={`/admin/users?kind=${urlKind}`}
                 className={({ isActive }) =>
                   `rounded-lg px-3 py-2 font-medium transition ${
                     isActive ? "bg-brand-50 text-brand-600" : "text-slate-600 hover:bg-slate-100"
