@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { Clock } from "lucide-react";
 import { Card, PageHeader } from "@/components/Ui";
 import {
   fetchAllCampaignsBoth,
@@ -10,6 +11,7 @@ import {
 } from "@/lib/queries";
 import { EventIdsEditor, parseEventIds } from "@/components/EventIdsEditor";
 import { CampaignEditModal } from "@/components/CampaignEditModal";
+import { CampaignSchedulesModal } from "@/components/CampaignSchedulesModal";
 import type { AdminCampaignRow } from "@/lib/queries";
 import { useAutoRefresh } from "@/hooks/useAutoRefresh";
 import { formatNumber } from "@/lib/format";
@@ -31,6 +33,7 @@ export default function AdminCampaigns() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [kindFilter, setKindFilter] = useState<KindFilter>("all");
   const [editing, setEditing] = useState<AdminCampaignRow | null>(null);
+  const [viewingSchedules, setViewingSchedules] = useState<AdminCampaignRow | null>(null);
 
   // Single call returns campaigns from BOTH schemas, tagged with `kind`.
   const { data: campaigns, loading, error, refresh } = useAutoRefresh(
@@ -220,18 +223,14 @@ export default function AdminCampaigns() {
                     />
                   </td>
                   <td className="px-4 py-3 text-slate-600">
-                    {profile?.email ? (
-                      <div className="flex flex-col">
-                        <span className="font-medium text-slate-800">{profile.email}</span>
-                        {profile.full_name && (
-                          <span className="text-xs text-slate-400">{profile.full_name}</span>
-                        )}
-                      </div>
+                    {/* Only the name. Fall back to the email username, then a
+                        short id, when the profile has no full name. */}
+                    {profile?.full_name ? (
+                      <span className="font-medium text-slate-800">{profile.full_name}</span>
+                    ) : profile?.email ? (
+                      <span className="font-medium text-slate-800">{profile.email.split("@")[0]}</span>
                     ) : (
-                      <span
-                        className="font-mono text-xs text-slate-400"
-                        title={c.creator_id}
-                      >
+                      <span className="font-mono text-xs text-slate-400" title={c.creator_id}>
                         {c.creator_id.slice(0, 8)}…
                       </span>
                     )}
@@ -254,7 +253,16 @@ export default function AdminCampaigns() {
                       ? formatNumber(audienceCounts[`${c.kind}-${c.id}`])
                       : "—"}
                   </td>
-                  <td className="px-4 py-3 text-slate-600">{c.action_keys.join(", ")}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => setViewingSchedules(c)}
+                      title="Ver canales y horarios programados"
+                      className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-left text-xs text-slate-600 hover:bg-slate-50"
+                    >
+                      <Clock size={13} className="shrink-0 text-slate-400" />
+                      <span className="max-w-[160px] truncate">{c.action_keys.join(", ")}</span>
+                    </button>
+                  </td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex justify-end gap-1">
                       <button
@@ -305,6 +313,13 @@ export default function AdminCampaigns() {
             setEditing(null);
             await refresh();
           }}
+        />
+      )}
+
+      {viewingSchedules && (
+        <CampaignSchedulesModal
+          campaign={viewingSchedules}
+          onClose={() => setViewingSchedules(null)}
         />
       )}
     </div>
