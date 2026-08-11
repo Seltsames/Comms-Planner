@@ -1,30 +1,32 @@
 # CommsPlanner — Traspaso de proyecto
 
-> Estado a **23 jul 2026**. Este documento permite retomar el trabajo en un chat
-> nuevo sin contexto previo. Léelo completo antes de tocar nada: hay **trabajo a
-> medias** (sección ⚠️ abajo).
+> Estado a **6 ago 2026**. Este documento permite retomar el trabajo en un chat
+> nuevo sin contexto previo. Léelo completo antes de tocar nada.
 
 ---
 
 ## Estado actual
 
-**Rama:** `feature/pr-changes` · mocks limpios · build en verde.
+**Rama:** `feature/pr-changes` (todo se mergea a `main` vía PR) · mocks limpios ·
+build en verde · **nada a medias**. Último PR fusionado: **#30**. Último bundle en
+producción: `index-EprusqgQ.js`.
 
-Lo último que se construyó fueron las **tarjetas de CTR/CTOR en "Mis campañas"**:
+Base de datos al día hasta la migración **00049**. Repo y base sincronizados
+(todos los `.sql` de 00040–00049 están en `supabase/migrations/`).
 
-- ✅ Migración `00039` aplicada en producción y su archivo `.sql` en el repo
-  (se recuperó con `pg_get_functiondef` y se verificó idéntica byte a byte)
-- ✅ Frontend commiteado (`src/lib/queries.ts`, `src/pages/MyCampaigns.tsx`)
-- ⏳ **Falta:** PR → merge a `main` → esperar el deploy de Netlify
+### Flujo de trabajo de cada cambio (probado ~30 veces)
 
-Para desplegarlo:
-
-```bash
-git push -u origin feature/pr-changes && gh pr create --fill && gh pr merge --merge
-```
-
-> `gh` está en `~/.local/bin/gh` (puede no estar en el PATH).
-> Node necesita `export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$PATH"`.
+1. Editar → `npm run build` (valida tipos). Node:
+   `export PATH="$HOME/.nvm/versions/node/v24.18.0/bin:$PATH"`
+2. Cambios de **base**: aplicar con el MCP (`apply_migration`) **y** guardar el
+   `.sql` en `supabase/migrations/`.
+3. Verificar en el navegador si es UI nueva (patrón del mock, abajo).
+4. Commit → push → `~/.local/bin/gh pr create` → `gh pr merge --merge`.
+5. Si cambió el frontend, esperar el deploy y confirmar el hash del bundle:
+   ```bash
+   for i in $(seq 1 20); do H=$(curl -s "https://commsplannerv2.netlify.app/?v=$(date +%s)" | grep -oE 'index-[A-Za-z0-9_-]+\.js' | head -1); [ "$H" = "<hash-del-build-local>" ] && { echo "$H"; break; }; sleep 15; done
+   ```
+   Un cambio **solo de base** no cambia el bundle: no hay que esperar deploy.
 
 ### ⚠️ Antes de cualquier commit: revisa que no haya mocks
 
@@ -35,6 +37,10 @@ Antes de commitear, esto debe devolver **vacío**:
 ```bash
 grep -rn "PREVIEW_MOCK" src/ .env.local
 ```
+
+> `tsconfig.app.tsbuildinfo` aparece siempre como modificado (caché del
+> compilador, tracked por error en un commit viejo). **Nunca lo incluyas** en un
+> commit — añade los archivos por nombre, no `git add -A`.
 
 ---
 
@@ -106,7 +112,7 @@ correcto en `src/lib/queries.ts` según `kind`.
 
 ---
 
-## Migraciones aplicadas (00030 → 00039)
+## Migraciones aplicadas (00030 → 00049)
 
 | # | Qué hace |
 |---|---|
@@ -120,6 +126,47 @@ correcto en `src/lib/queries.ts` según `kind`.
 | 00037 | `campaign_metrics` + `get_campaign_metrics` (admin) |
 | 00038 | Métricas agregadas por campaña+canal con fórmulas por canal |
 | 00039 | `get_my_campaign_metrics` (métricas de mis propias campañas) |
+| 00040 | **Subida por lotes:** `begin_campaign_upload` / `append_campaign_audience` / `finalize_campaign_upload` (+`_pax`, +`abort_`). Borrador oculto con `deleted_at`. Parcha `check_cohort_conflicts` y `get_analytics_aggregates` para excluir `draft` |
+| 00041 | Las previsualizaciones referencian el cohorte por id: `get_slot_availability_by_cohort`, `check_cohort_conflicts_by_cohort`, `update_campaign_draft` (+`_pax`). Antes mandaban ~9 MB de ids por llamada |
+| 00042 | **Fix "No space left on device":** `get_analytics_aggregates` recorta a top-10 antes de armar arreglos. OJO: PAX usa CTE `passenger_totals`/`top_passengers` |
+| 00043 | Elimina 3 índices redundantes de `campaign_audience` (pkey con 0 usos, etc.). PAX quedó sin efecto → 00044 |
+| 00044 | **Fix de 00043:** los índices PAX llevan prefijo `pax_`; verifica el resultado en vez de confiar en `IF EXISTS` |
+| 00045 | **Push autoaprobado:** quita la rama `v_has_push → 'pending'` de las 4 funciones de guardado (revierte la 00020) |
+| 00046 | **Bloqueo de franja por >50% del cohorte:** `get_slot_availability_by_cohort` marca `red` sólo si otra campaña que choca en tiempo comparte >50% del cohorte (antes: 1 conductor) |
+| 00047 | **`update_campaign` / `update_campaign_pax`:** el admin edita metadatos + canales + ciudades + horarios de una campaña existente, con re-validación de estado |
+| 00048 | **Fix timeout:** la re-validación de estado usa un único chequeo (>50%, mismo canal, guiado por `campaign_id`) en vez del Seq Scan de 1,3M filas. Cambia semántica: pending sólo por choque de mismo canal con >50% (aplica a creación y edición) |
+| 00049 | **Fix timeout (2):** filtro barato antes del día-bloqueado. Si ningún día llega a 3 horarios push de otras campañas, se salta la agregación de ~5 s |
+
+---
+
+## Guardado de campañas: la arquitectura ACTUAL (cambió mucho)
+
+El `save_campaign_v2` original **ya no se usa** (queda como función vieja). El
+cliente (`saveCampaignRpc` en `queries.ts`) hace ahora, en orden:
+
+1. **`uploadCohortDraft()`** — al validar el CSV en el Builder: crea un borrador
+   oculto (`begin_campaign_upload`) y sube la audiencia en **lotes de 25.000**
+   (`append_campaign_audience`), con barra de progreso.
+2. El Builder referencia ese borrador por `cohortId` para la disponibilidad de
+   franjas (`get_slot_availability_by_cohort`) y el preview de conflictos —
+   **nunca reenvía los ids**.
+3. Al guardar: `update_campaign_draft` (metadatos + horarios) → `finalize_campaign_upload`
+   (re-valida estado y limpia `deleted_at`).
+
+**Por qué NO se manda el cohorte en una sola petición:** un cohorte de 469k son
+25 MB que Postgres expande a JSON + arreglo de 469k textos + INSERT, ~17 s
+contra el `statement_timeout = 8s`, y el pico de memoria **tumbaba la base**
+(pasó 3 veces el 2026-07-23). Ni el guardado ni las previsualizaciones pueden
+llevar el arreglo de ids completo. Detalle abajo en "Cohortes grandes".
+
+**Regla de estado (aprobado vs pendiente), tras 00045+00048:**
+- El sistema **autoaprueba** salvo choque real. No hay regla especial de push.
+- Pasa a **`pending`** sólo si otra campaña del **mismo canal** que choca en
+  horario (±60 min o día completo) comparte **>50%** del cohorte.
+- El **día bloqueado** (3+ push al mismo conductor el mismo día) aborta el
+  guardado/edición entera (es un bloqueo duro, no revisión).
+- El cliente ya **no** manda `status:"pending"` fijo — deja decidir a la base.
+- La columna `plan_id` sigue en la BD (histórico) pero se quitó de la UI.
 
 ---
 
@@ -131,6 +178,9 @@ correcto en `src/lib/queries.ts` según `kind`.
 - Chips DRV/PAX por usuario (editables también para admins = define su alcance)
 
 **Builder**
+- Equipos DRV en `DRV_TEAMS_HIERARCHY` (`constants.ts`): Brand Connection,
+  Growth, Engagement, Experience (con sub-equipos) + **Índigo** y **AR HUB**
+  (planos, `subTeams: []`). La UI oculta el selector de sub-equipo si está vacío.
 - PAX: sin sub-equipos, 6 equipos propios; DRV: equipo+sub-equipo antes del nombre
 - País y ciudades antes de la nomenclatura; listas de ciudades desplegables
 - Ad Placement: rango horario libre (desde–hasta), sin franjas por hora
@@ -138,11 +188,24 @@ correcto en `src/lib/queries.ts` según `kind`.
   (se guarda con `time_slot = 'TRIGGER'`)
 - Al guardar: sin modal, va directo al Dashboard
 
-**Campañas**
-- Columnas Cohort (impactados) y Plan ID (obligatorio al aprobar push)
-- Event IDs múltiples: uno por tipo de comunicación + botón "+"
-- Descarga de calendario en **XLSX** con el formato del template de ops
-  (Campaign name / User / grilla Platform-Channel-Plan ID × días)
+**Campañas (Gestión de campañas — `AdminCampaigns.tsx`)**
+Vista **única** que muestra DRV y PAX juntos (filtro por chips). Cada fila lleva
+`kind`; los modales y RPC despachan por él, así que **todo funciona en ambas
+plataformas** sin duplicar código. Es una ruta compartida `/admin/campaigns` que
+lleva la plataforma en `?kind` (ver trampa #7).
+- Columna **Cohort** (impactados). La columna Plan ID **se quitó** (00045).
+- Columna **Usuario**: sólo el nombre (antes email).
+- Columna **Progreso**: `On going` / `Concluded` (concluded = última comm
+  terminó hace +24 h; sólo aprobadas). Se calcula en el cliente desde
+  `campaign_schedules`.
+- Columna **Fechas** en dos filas (inicio / fin).
+- Columna **Canales**: botón que abre `CampaignSchedulesModal` con los horarios
+  específicos por canal (fecha + hora), no "toda la campaña".
+- Botón **Editar** → `CampaignEditModal`: cambia nombre/equipo/tipos/canales/
+  ciudades/fechas/horarios (NO el cohorte). Reúsa el `TimeSlotPicker` con
+  `cohortId = id de la campaña`. Al guardar re-valida el estado (00047/00048).
+- Event IDs múltiples: uno por tipo de comunicación + botón "+".
+- Descarga de calendario en **XLSX** (formato del template de ops), en Mis campañas.
 
 **Dashboard**
 - Separado por plataforma (calendario y análisis nunca mezclan DRV/PAX)
@@ -301,20 +364,51 @@ alto, buscar un slot de replicación reteniéndolo.
    (SECURITY DEFINER). Un `select` directo devuelve vacío, no es un bug.
 5. El reporte puede traer **filas duplicadas** con la misma clave; se combinan
    sumando (Postgres rechaza upsert de la misma clave dos veces por lote).
+6. **Parchear funciones grandes por regexp** sobre `pg_get_functiondef()` en un
+   bloque `DO` (patrón de 00040/00045/00048/00049): idempotente, y con una
+   guarda que **falla ruidosamente** si el patrón no aparece. Contá cuántas
+   parchaste y aborta si no son las esperadas — un `replace` que no encuentra su
+   patrón es un no-op silencioso. **PAX casi siempre difiere**: índices con
+   prefijo `pax_`, CTE con otro nombre (`passenger_totals`), columna `pax_id`.
+   Verificá el resultado, no confíes en `IF EXISTS`/`replace` (lección de 00043).
+7. **Rutas de admin llevan la plataforma en `?kind`, no en el path.** `/admin/*`
+   es compartido entre DRV y PAX. El navbar lee `?kind` en rutas `/admin` para no
+   saltar a "Driver"; los enlaces de admin lo añaden. Si tocás el navbar o esas
+   rutas, mantené `?kind`.
+8. **El `statement_timeout` del rol `authenticated` es 8 s y NO se puede subir
+   por función** (el temporizador se arma al inicio de la sentencia; probado).
+   Cualquier RPC que cruce audiencias de 469k debe: guiarse por `campaign_id`
+   (usa el índice único, ~0,5 s por par de cohortes), no por `= ANY(arreglo)`
+   (Seq Scan de 1,3M filas); y anteponer filtros baratos sobre `campaign_schedules`
+   antes de agregar audiencia. Medir SIEMPRE el peor caso con
+   `SET LOCAL statement_timeout='8s'` en una transacción con `ROLLBACK`.
+9. **Verificación en local con datos:** el mock no tiene sesión, así que las RPC
+   fallan. Para ver una pantalla con datos hay que mockear también los hooks de
+   datos (ej. `fetchAllCampaignsBoth`, `fetchCampaignSchedules`) tras el flag
+   `VITE_PREVIEW_MOCK`. Recordá quitar TODOS esos mocks + el de `auth.tsx`
+   (`git checkout -- src/lib/auth.tsx`) + la línea de `.env.local` antes de
+   commitear.
 
 ---
 
 ## Siguientes pasos sugeridos
 
-1. **Desplegar lo pendiente**: PR + merge de `feature/pr-changes` para que las
-   tarjetas CTR/CTOR de Mis campañas lleguen a producción.
-2. **Poblar Event IDs** en las campañas para que las métricas se vinculen.
-3. **Revisar por qué no llegan datos PAX** del Sheet (¿faltan hojas, o la columna
-   `user_type` no dice `pax`?). El script omite filas cuyo `user_type` no sea
-   exactamente `drv` o `pax`.
-4. Opcional, ya conversado pero no implementado:
-   - Actualización en vivo con Supabase Realtime (hoy hay polling cada 60 s, y
-     Gestión de usuarios ni siquiera lo tiene: solo botón "Refrescar")
-   - Que Push trigger exija aprobación manual con Plan ID
-   - Inserción por lotes de la audiencia para cohortes > 200k
-     (el rol `authenticated` tiene `statement_timeout = 8s`)
+1. **Poblar Event IDs** en las campañas para que las métricas se vinculen (sin
+   eso, CTR/CTOR aparecen "sin vincular").
+2. **Revisar por qué no llegan datos PAX** del Sheet de métricas (¿faltan hojas,
+   o la columna `user_type` no dice exactamente `pax`?). El script omite filas
+   cuyo `user_type` no sea `drv` o `pax`.
+3. **Subir a Supabase Pro** — es la deuda de fondo. Free = instancia chica (causa
+   de las caídas), sin ramas para pruebas de carga, disco de 500 MB que una
+   campaña de 469k (~79 MB) más el WAL ya aprietan. Ver "plan Free" abajo.
+4. **Optimizar `get_slot_availability_by_cohort`** con el mismo filtro barato de
+   00049: hoy tarda ~1,7 s con un cohorte de 469k (no da timeout, pero el
+   selector de horarios del Builder/editor se siente lento). Mismo día-bloqueado
+   agregando audiencia push.
+5. Opcional, ya conversado:
+   - Actualización en vivo con Supabase Realtime (hoy polling cada 60 s;
+     Gestión de usuarios solo tiene botón "Refrescar").
+   - Alerta de campaña finalizada por **correo/push** real (hoy es sólo in-app:
+     columna Progreso). Requiere proveedor + cron; no existe canal saliente.
+   - Editar el **cohorte** en el modal de edición (hoy no se puede; para cambiar
+     el público se crea otra campaña).
