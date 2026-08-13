@@ -136,6 +136,35 @@ correcto en `src/lib/queries.ts` según `kind`.
 | 00047 | **`update_campaign` / `update_campaign_pax`:** el admin edita metadatos + canales + ciudades + horarios de una campaña existente, con re-validación de estado |
 | 00048 | **Fix timeout:** la re-validación de estado usa un único chequeo (>50%, mismo canal, guiado por `campaign_id`) en vez del Seq Scan de 1,3M filas. Cambia semántica: pending sólo por choque de mismo canal con >50% (aplica a creación y edición) |
 | 00049 | **Fix timeout (2):** filtro barato antes del día-bloqueado. Si ningún día llega a 3 horarios push de otras campañas, se salta la agregación de ~5 s |
+| 00050 | **Privacidad: audiencia hasheada.** `append_campaign_audience` (+`_pax`) guarda `HMAC-SHA256(id, pepper)` hex en vez del id crudo. Pepper en `private.app_secrets` (esquema no expuesto). Determinista → solapes siguen funcionando. La audiencia con ids crudos se vació con TRUNCATE |
+
+---
+
+## ⚠️ IDs de audiencia hasheados (privacidad) — leer antes de tocar la audiencia
+
+Desde 00050, `campaign_audience.drv_id`/`pax_id` guardan un **HMAC-SHA256 hex**
+del id crudo, no el id. El hasheo ocurre **sólo** en `append_campaign_audience`
+(el único punto por donde entra un id crudo). Es determinista, así que toda la
+lógica de solapes/choques/día-bloqueado sigue igual (compara hash contra hash).
+
+**El pepper** (clave HMAC) vive en **`private.app_secrets`** (`name =
+'audience_pepper'`), esquema **no expuesto por PostgREST** y sin permisos para
+`authenticated`/`anon`. Es **crítico e irrecuperable**:
+- Si se pierde/cambia, **todos los hashes dejan de cruzarse** (los solapes se
+  rompen sin avisar) y no se puede saber qué id era cada hash. Un backup de la
+  base lo incluye. **No borrar ni cambiar esa fila.**
+- No está en el repo ni en ningún log (se generó con `gen_random_bytes` en la
+  base). El archivo `00050_*.sql` sólo tiene la expresión, no el valor.
+
+Implicaciones al programar:
+- **Nunca** compares un id crudo (de un CSV, de un parámetro) contra
+  `campaign_audience` — no coincidirá. Hay que hashearlo primero con el mismo
+  pepper (dentro de una función SECURITY DEFINER que lo lea).
+- Las funciones viejas de arreglo (`get_slot_availability_v2`,
+  `check_cohort_conflicts`) reciben ids crudos y quedaron **muertas** desde
+  00041; si alguien las revive, darán resultados vacíos contra datos hasheados.
+- La audiencia con ids crudos previos se **borró** (TRUNCATE); las campañas de
+  antes de 00050 quedaron con Cohort 0.
 
 ---
 
